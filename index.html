@@ -10129,6 +10129,10 @@ function computeValidClassChain() {
     // pathClass มักเป็นอาชีพเริ่มต้น (Novice/สาย) — อนุญาตให้อยู่ในสาย
     chain.unshift(player.pathClass);
   }
+  // ต่อท้ายอาชีพขั้น 4 (ไม่มีในตาราง THIRD_CLASS_OPTIONS จึงไล่ย้อนหาไม่เจอ)
+  // ถ้าไม่ใส่ไว้ refundOffPathSkills() จะลบแต้มสกิลขั้น 4 ทิ้งทุกครั้งที่เปิดหน้าสกิล
+  const fourth = player.fourthClass || (player.className !== top ? player.className : null);
+  if (fourth && skillDefs[fourth] && !chain.includes(fourth)) chain.push(fourth);
   return chain;
 }
 function openSkillTree(cls) {
@@ -10140,7 +10144,8 @@ function openSkillTree(cls) {
   // ต้องมีครบทุกขั้น ไม่งั้นสกิลที่ลงแต้มไว้ในขั้นก่อนหน้าจะเข้าไม่ถึง
   let tabs = [];
   const validChain = computeValidClassChain();   // สายอาชีพที่ถูกต้องของผู้เล่น
-  [player.pathClass, player.firstJobClass, player.secondJobClass, player.highClassPrev, player.className].forEach(c => {
+  [player.pathClass, player.firstJobClass, player.secondJobClass, player.highClassPrev,
+   player.thirdClass, player.fourthClass, player.className].forEach(c => {
     if (c && skillDefs[c] && !tabs.includes(c) && (!validChain || validChain.includes(c))) tabs.push(c);
   });
   if (!tabs.length) tabs = [player.className];
@@ -11826,6 +11831,9 @@ function materialInfo(key) {
   if (key === 'biolab_key2')   return { name: BIOLAB_KEY2.name,    color: BIOLAB_KEY2.color };
   if (key === 'repair_hammer') return { name: REPAIR_HAMMER.name,  color: REPAIR_HAMMER.color };
   if (key === 'repair_kit')    return { name: REPAIR_KIT.name,     color: REPAIR_KIT.color };
+  if (key === 'tower_coin')    return { name: TOWER_COIN.name,     color: TOWER_COIN.color,   sub: 'หอคอย' };
+  if (key === 'tower_shard')   return { name: TOWER_SHARD.name,    color: TOWER_SHARD.color,  sub: 'หอคอย' };
+  if (key === 'tower_core')    return { name: TOWER_CORE.name,     color: TOWER_CORE.color,   sub: 'หอคอย' };
   for (const [mid, mm] of Object.entries(MAP_MATERIALS)) {
     if (mm.key === key) return { name: mm.nameTh, color: mm.color, sub: MAPS[mid] ? MAPS[mid].name : '' };
   }
@@ -14600,11 +14608,11 @@ function applyFourthClass() {
   closeModal();
   try {
     document.getElementById('pname').textContent = target;
-    document.getElementById('pclass').textContent = 'aachiip: ' + target;
+    document.getElementById('pclass').textContent = 'อาชีพ: ' + target;
     document.getElementById('spCount').textContent = player.skillPoints;
   } catch (e) {}
   refreshQuickBtn(); updateHUD(); recalcMaxHpSp(true);
-  log('Class 4: ' + target + '! +SP ' + FOURTH_START_SP + ' cap Lv' + LEVEL_CAP_FOURTH, 'job');
+  log(`⚡ ก้าวสู่อาชีพขั้น 4: ${target}! ได้แต้มสกิล +${FOURTH_START_SP} — สกิลเดิมทั้งหมดยังใช้ได้ เก็บเลเวลได้ถึง Lv.${LEVEL_CAP_FOURTH}`, 'job');
 }
 function fourthClassReqText() {
   var t = (player.tower && player.tower.bestFloor) || 0;
