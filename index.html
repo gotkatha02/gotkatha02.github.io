@@ -3594,6 +3594,13 @@ const FLEE_PASSIVE_KEYS = { Rogue:'chaseWalk', Bard:'windBallad', Hunter:'camouf
 const REFLECT_PASSIVE_KEYS = { Crusader:'reflectShield', Rogue:'rejectSword', 'Paladin':'plReflect' };
 const ASPD_PASSIVE_KEYS = { Sage:'freeCast', Bard:'encore' };
 // สกิล passive ฝึกฝนสเตตัสพื้นฐานแบบเรียบง่าย (ใช้เติมสกิลทรีของอาชีพขั้น 2 ให้มีตัวเลือกมากกว่าจำนวนแต้ม)
+// คูลดาวน์สกิล Shadow Cross (ms) — แก้ค่านี้ค่าเดียวมีผลทั้ง 4 สกิล
+const SHADOWCROSS_CD = 500;
+// ตัวคูณ SP ที่สกิลใช้ (1 = ราคาเดิม, 0.4 = จ่ายแค่ 40%)
+const SHADOWCROSS_SP_MUL = 0.4;   // สาย Shadow Cross (คูลดาวน์ 0.5 วิ ยิงถี่ที่สุด)
+const GUILLOTINE_SP_MUL  = 0.6;   // สาย Guillotine Cross ที่เอามาออโต้ร่วมกัน
+// เปิดให้ดาเมจจากสกิลทอยคริติคอลได้ (ใช้ critChance()/critMultiplier() ชุดเดียวกับตีธรรมดา)
+const SKILL_CRIT_ENABLED = true;
 const FLAT_STAT_SKILLS = {
   cavalryTraining:{stat:'str',amt:1}, ironWill:{stat:'vit',amt:1}, concentration:{stat:'dex',amt:1},
   devotion:{stat:'str',amt:1}, spearQuicken:{stat:'agi',amt:1}, providence:{stat:'vit',amt:1},
@@ -4645,7 +4652,7 @@ const skillDefs = {
   ],
   'Guillotine Cross': [
     { key:'gxCrossImpact', name:'Cross Impact', type:'active', desc:'แทงรัว 7 ครั้ง — ติดคริได้ ไม่มีคูลดาวน์ รัวตาม ASPD ใช้ SP น้อย', maxLv:5,
-      spam:true, sp:(lv)=>5+lv, cd:()=>Math.max(120, attackInterval()),
+      spam:true, sp:(lv)=>Math.max(1,Math.round((5+lv)*GUILLOTINE_SP_MUL)), cd:()=>Math.max(120, attackInterval()),
       cast:(lv)=>{ const t=player.target; if(!t||!t.alive) return false;
         const dmg=Math.round(attackPower()*(0.22+lv*0.10));
         for(let i=0;i<7;i++){
@@ -4653,23 +4660,23 @@ const skillDefs = {
           // แต่ละฮิตสุ่มคริแยกกัน และรวมเลขแบบแรคนาร็อค (ขาว -> เหลืองสะสม)
           const crit = Math.random() < critChance();
           const d = crit ? Math.round(dmg * critMultiplier()) : dmg;
-          dealDamage(t, d, crit, 'merge');
+          noSkillCrit = true; dealDamage(t, d, crit, 'merge'); noSkillCrit = false;
         }
         return true; } },
     { key:'gxDarkClaw', name:'Dark Claw', type:'active', desc:'ทำเครื่องหมายให้เป้าหมายรับดาเมจเพิ่มมาก', maxLv:5,
-      sp:(lv)=>32+lv*3, cd:(lv)=>Math.max(9000,15000-lv*1100),
+      sp:(lv)=>Math.max(1,Math.round((32+lv*3)*GUILLOTINE_SP_MUL)), cd:(lv)=>Math.max(9000,15000-lv*1100),
       cast:(lv)=>{ const t=player.target; if(!t||!t.alive) return false; t.markUntil=performance.now()+(8000+lv*1000); t.markPct=0.20+lv*0.10; log(`ใช้ Dark Claw Lv.${lv} — เป้าหมายรับดาเมจเพิ่ม`,'lvl'); return true; } },
     { key:'gxCounterSlash', name:'Counter Slash', type:'active', desc:'สวนกลับด้วยความเร็วสูง', maxLv:5,
-      sp:(lv)=>28+lv*3, cd:(lv)=>Math.max(3600,6400-lv*540),
+      sp:(lv)=>Math.max(1,Math.round((28+lv*3)*GUILLOTINE_SP_MUL)), cd:(lv)=>Math.max(3600,6400-lv*540),
       cast:(lv)=>{ const t=player.target; if(!t||!t.alive) return false; const dmg=Math.round(attackPower()*(0.95+lv*0.21)); for(let i=0;i<3;i++){ if(!t.alive) break; dealDamage(t,dmg); } log(`ใช้ Counter Slash Lv.${lv}`,'hit'); return true; } },
     { key:'gxPhantomMenace', name:'Phantom Menace', type:'active', desc:'โจมตีทุกตัวรอบข้างพร้อมกัน', maxLv:5,
-      sp:(lv)=>30+lv*3, cd:(lv)=>Math.max(4200,7400-lv*620),
+      sp:(lv)=>Math.max(1,Math.round((30+lv*3)*GUILLOTINE_SP_MUL)), cd:(lv)=>Math.max(4200,7400-lv*620),
       cast:(lv)=>{ const dmg=Math.round(attackPower()*(1.5+lv*0.34)); let hit=0; monsters.forEach(m=>{ if(m.alive && dist(m,player)<180){ dealDamage(m,dmg); hit++; } }); if(hit){ log(`ใช้ Phantom Menace Lv.${lv} โดน ${hit} ตัว`,'hit'); } return hit>0; } },
     { key:'gxRollingCutter', name:'Rolling Cutter', type:'active', desc:'หมุนตัดกวาดรอบทิศ', maxLv:5,
-      sp:(lv)=>26+lv*3, cd:(lv)=>Math.max(3400,6000-lv*520),
+      sp:(lv)=>Math.max(1,Math.round((26+lv*3)*GUILLOTINE_SP_MUL)), cd:(lv)=>Math.max(3400,6000-lv*520),
       cast:(lv)=>{ const dmg=Math.round(attackPower()*(1.2+lv*0.28)); let hit=0; monsters.forEach(m=>{ if(m.alive && dist(m,player)<160){ dealDamage(m,dmg); hit++; } }); if(hit){ log(`ใช้ Rolling Cutter Lv.${lv} โดน ${hit} ตัว`,'hit'); } return hit>0; } },
     { key:'gxVenomPressure', name:'Venom Pressure', type:'active', desc:'อัดพิษเข้าเป้าหมาย ดาเมจต่อเนื่อง', maxLv:5, req:{key:'gxCrossImpact',lv:2},
-      sp:(lv)=>30+lv*3, cd:(lv)=>Math.max(5000,8800-lv*720),
+      sp:(lv)=>Math.max(1,Math.round((30+lv*3)*GUILLOTINE_SP_MUL)), cd:(lv)=>Math.max(5000,8800-lv*720),
       cast:(lv)=>{ const t=player.target; if(!t||!t.alive) return false; const dmg=Math.round(attackPower()*(1.6+lv*0.36)); dealDamage(t,dmg); t.poison=Math.max(t.poison||0,4+lv); t.poisonTicks=6+lv; log(`ใช้ Venom Pressure Lv.${lv} ดาเมจ ${dmg} + พิษ`,'hit'); return true; } },
     { key:'gxWeaponCrush', name:'Weapon Crush', type:'passive', desc:'ลดค่าป้องกันศัตรู เพิ่มดาเมจ 4% ต่อเลเวล', maxLv:5, },
     { key:'gxAdvancedKatar', name:'Advanced Katar', type:'passive', desc:'เพิ่มโอกาสคริติคอล 3% ต่อเลเวล', maxLv:5, },
@@ -4680,16 +4687,16 @@ const skillDefs = {
   ],
   'Shadow Cross': [
     { key:'sxSavageImpact', name:'Savage Impact', type:'active', desc:'\u0e1e\u0e38\u0e48\u0e07\u0e41\u0e17\u0e07\u0e23\u0e31\u0e27 4 \u0e19\u0e31\u0e14 \u0e40\u0e1b\u0e49\u0e32\u0e40\u0e14\u0e35\u0e22\u0e27', maxLv:5,
-      sp:(lv)=>44+lv*6, cd:(lv)=>Math.max(3600,6800-lv*620),
+      sp:(lv)=>Math.max(1,Math.round((44+lv*6)*SHADOWCROSS_SP_MUL)), cd:(lv)=>SHADOWCROSS_CD,
       cast:(lv)=>{ const m=player.target; if(!m||!m.alive) return false; const per=Math.round(attackPower()*(6.80+lv*1.50)/4); for(let i=0;i<4;i++){ setTimeout(()=>{ if(m&&m.alive) dealDamage(m,per,true); },i*90); } spawnFloatText(player.x,player.y-48,'Savage Impact','#c060ff'); return true; } },
     { key:'sxShadowStab', name:'Shadow Stab', type:'active', desc:'\u0e41\u0e17\u0e07\u0e17\u0e30\u0e25\u0e38\u0e40\u0e07\u0e32 \u0e14\u0e32\u0e40\u0e21\u0e08\u0e2a\u0e39\u0e07\u0e2a\u0e38\u0e14', maxLv:5,
-      sp:(lv)=>38+lv*5, cd:(lv)=>Math.max(3000,5800-lv*540),
+      sp:(lv)=>Math.max(1,Math.round((38+lv*5)*SHADOWCROSS_SP_MUL)), cd:(lv)=>SHADOWCROSS_CD,
       cast:(lv)=>{ const m=player.target; if(!m||!m.alive) return false; const dmg=Math.round(attackPower()*(5.40+lv*1.24)); dealDamage(m,dmg,true); spawnFloatText(m.x,m.y-40,'SHADOW','#a060e0'); return true; } },
     { key:'sxImpactCrater', name:'Impact Crater', type:'active', desc:'\u0e2b\u0e21\u0e38\u0e19\u0e15\u0e35\u0e23\u0e2d\u0e1a\u0e15\u0e31\u0e27 AoE 7 \u0e0a\u0e48\u0e2d\u0e07', maxLv:5,
-      sp:(lv)=>52+lv*7, cd:(lv)=>Math.max(6000,10000-lv*820),
+      sp:(lv)=>Math.max(1,Math.round((52+lv*7)*SHADOWCROSS_SP_MUL)), cd:(lv)=>SHADOWCROSS_CD,
       cast:(lv)=>{ const dmg=Math.round(attackPower()*(4.50+lv*1.04)); let hit=0; monsters.forEach(m=>{ if(m.alive && dist(m,player)<224){ dealDamage(m,dmg); hit++; } }); if(hit){ spawnFloatText(player.x,player.y-48,'Impact Crater','#b070f0'); } return hit>0; } },
     { key:'sxDarkClaw', name:'Dark Claw', type:'active', desc:'\u0e15\u0e34\u0e14\u0e23\u0e2d\u0e22\u0e40\u0e07\u0e32 \u0e40\u0e1e\u0e34\u0e48\u0e21\u0e14\u0e32\u0e40\u0e21\u0e08\u0e17\u0e35\u0e48\u0e40\u0e02\u0e49\u0e32\u0e40\u0e1b\u0e49\u0e32', maxLv:5,
-      sp:(lv)=>34+lv*5, cd:(lv)=>Math.max(9000,15000-lv*1200),
+      sp:(lv)=>Math.max(1,Math.round((34+lv*5)*SHADOWCROSS_SP_MUL)), cd:(lv)=>SHADOWCROSS_CD,
       cast:(lv)=>{ const m=player.target; if(!m||!m.alive) return false; const dmg=Math.round(attackPower()*(3.20+lv*0.72)); dealDamage(m,dmg,true); m.darkClawUntil=performance.now()+(4000+lv*800); m.darkClawPct=0.10+lv*0.04; spawnFloatText(m.x,m.y-44,'DARK CLAW','#8040c0'); return true; } },
     { key:'sxWeaponBlocking', name:'Shadow Guard', type:'passive', desc:'\u0e40\u0e1e\u0e34\u0e48\u0e21 ATK 8% \u0e15\u0e48\u0e2d\u0e40\u0e25\u0e40\u0e27\u0e25', maxLv:5, },
     { key:'sxPoisonMastery', name:'Poison Mastery', type:'passive', desc:'\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e14\u0e32\u0e40\u0e21\u0e08\u0e2a\u0e01\u0e34\u0e25 5% \u0e15\u0e48\u0e2d\u0e40\u0e25\u0e40\u0e27\u0e25', maxLv:5, },
@@ -7400,75 +7407,268 @@ const player = {
 // ดึงมาจากสูตรใน cast ของแต่ละสกิล: ดาเมจ = ATK * (base + lv*per)
 // ใช้แสดง % ดาเมจให้ผู้เล่นรู้ว่าสกิลไหนแรงแค่ไหน
 const SKILL_DMG = {
+  // ---- Swordman ----
   bash: { base:1.5, per:0.3 },
   magnum: { base:0.8, per:0.25 },
+  // ---- Thief ----
   envenom: { base:1.1, per:0.15 },
   grimtooth: { base:0.9, per:0.2 },
+  // ---- Acolyte ----
   holyLight: { base:1.3, per:0.26 },
+  // ---- Archer ----
   dstrafe: { base:0.7, per:0.15 },
   ashower: { base:0.6, per:0.15 },
   charge: { base:2, per:0.3 },
   focusArrow: { base:2.2, per:0.34 },
+  // ---- Merchant ----
   mammonite: { base:0.8, per:0.15 },
   cartcannon: { base:1, per:0.2 },
   cartRevolution: { base:0.8, per:0.22 },
+  // ---- Mage ----
   frostbolt: { base:1.3, per:0.25 },
   nova: { base:0.8, per:0.25 },
   soulstrike: { base:0.9, per:0.2 },
   sight: { base:0.5, per:0.15 },
   firebolt: { base:1.35, per:0.27 },
   lightningbolt: { base:1.4, per:0.28 },
+  // ---- Wizard ----
+  fireball: { base:1.6, per:0.32 },
+  lightningBolt: { base:1.9, per:0.38 },
+  meteor: { base:2.6, per:0.55 },
+  jupitel: { base:2.2, per:0.45 },
+  // ---- Sage ----
+  earthSpike: { base:1.5, per:0.3 },
+  earthQuake: { base:1.8, per:0.4 },
+  // ---- Knight ----
   pierce: { base:1.6, per:0.3 },
   chargeAttack: { base:2, per:0.35 },
   bowlingBash: { base:1.7, per:0.3 },
   spearBoomerang: { base:0.7, per:0.2 },
   spiralPierce: { base:0.42, per:0.07 },
+  // ---- Crusader ----
   shieldCharge: { base:1.3, per:0.25 },
   holyCross: { base:1.7, per:0.3 },
   grandCross: { base:0.75, per:0.22 },
   shieldBoomerang: { base:1.2, per:0.22 },
   sacrificeBlow: { base:0.32, per:0.05 },
+  // ---- Priest ----
   magnusExorcismus: { base:0.8, per:0.25 },
   judex: { base:0.7, per:0.2 },
   adoramus: { base:1.4, per:0.25 },
   holySmite: { base:0.44, per:0.07 },
+  // ---- Monk ----
   occultImpact: { base:1.6, per:0.3 },
   asuraStrike: { base:2.4, per:0.4 },
   fingerOffensive: { base:0.65, per:0.18 },
-  ragingPalm: { base:0.40, per:0.07 },
+  ragingPalm: { base:0.4, per:0.07 },
+  // ---- Assassin ----
   sonicBlow: { base:0.7, per:0.12 },
   soulBreaker: { base:2.2, per:0.35 },
   crossImpact: { base:0.7, per:0.18 },
   meteorAssault: { base:0.34, per:0.05 },
+  // ---- Rogue ----
   raid: { base:0.7, per:0.18 },
   woundingStrike: { base:1.5, per:0.28 },
-  backStab: { base:0.40, per:0.07 },
+  backStab: { base:0.4, per:0.07 },
+  // ---- Alchemist ----
   acidBottle: { base:1.5, per:0.3 },
   demonstration: { base:0.75, per:0.2 },
   marshOfAbyss: { base:1.6, per:0.28 },
   sulfurFume: { base:0.7, per:0.18 },
   acidSpray: { base:0.32, per:0.05 },
+  // ---- Blacksmith ----
   meltdown: { base:1.9, per:0.35 },
   cartTerminationX: { base:0.85, per:0.22 },
   vulcanBlast: { base:0.75, per:0.2 },
   cartTornado: { base:1.9, per:0.32 },
   hammerStorm: { base:0.33, per:0.05 },
+  // ---- Bard ----
   musicalStrike: { base:0.9, per:0.18 },
   severeSong: { base:0.6, per:0.15 },
   dissonance: { base:1.5, per:0.28 },
   frostJoke: { base:0.65, per:0.16 },
   arrowVulcan: { base:0.42, per:0.07 },
+  // ---- Hunter ----
   trap: { base:1.4, per:0.28 },
   falconAssault: { base:2.1, per:0.35 },
   blitzBeat: { base:1.5, per:0.28 },
   sandman: { base:0.7, per:0.18 },
   sharpShooting: { base:0.43, per:0.07 },
+  // ---- Assassin Cross ----
+  xSonicBlow: { base:1.9, per:0.42 },
+  xMeteorRain: { base:3.72, per:0.78, hits:6 },
+  xSoulDestroyer: { base:1.35, per:0.3 },
+  xEnchantDeadly: { base:1.5, per:0.32 },
+  // ---- Stalker ----
+  scTripleAttack: { base:1.7, per:0.38 },
+  scRaid: { base:3.3, per:0.7, hits:5 },
+  scMaelstrom: { base:1.25, per:0.28 },
+  scFeintBomb: { base:1.6, per:0.34 },
+  // ---- Lord Knight ----
+  lkSpiralPierce: { base:2.1, per:0.46 },
+  lkClashingSpiral: { base:3.5, per:0.75, hits:5 },
+  lkBrandish: { base:1.4, per:0.32 },
+  lkHeadCrush: { base:1.7, per:0.36 },
+  // ---- Paladin ----
+  plShieldChain: { base:1.9, per:0.42 },
+  plGrandCrossX: { base:1.5, per:0.34 },
+  plShieldBoomerang: { base:2.88, per:0.64, hits:4 },
+  plSacrifice: { base:2.4, per:0.52 },
+  // ---- High Priest ----
+  hpHolyLight: { base:2.3, per:0.5, stat:'MATK' },
+  hpMagnusX: { base:1.6, per:0.36, stat:'MATK' },
+  // ---- Champion ----
+  chAsuraStrike: { base:4.5, per:1 },
+  chRagingQuadruple: { base:4.32, per:0.96, hits:6 },
+  chOccultImpaction: { base:1.4, per:0.32 },
+  chChainCrush: { base:1.8, per:0.38 },
+  // ---- High Wizard ----
+  hwStormGust: { base:2.6, per:0.58, stat:'MATK' },
+  hwMeteorStormX: { base:3.6, per:0.8, stat:'MATK' },
+  hwLordOfVermilion: { base:1.6, per:0.36, stat:'MATK' },
+  hwSoulExpansion: { base:2.2, per:0.48, stat:'MATK' },
+  hwJupitelX: { base:2, per:0.44, stat:'MATK' },
+  // ---- Professor ----
+  pfSoulBurn: { base:2.4, per:0.52, stat:'MATK' },
+  pfEarthquake: { base:1.55, per:0.35, stat:'MATK' },
+  pfSpellBreaker: { base:2, per:0.44, stat:'MATK' },
+  pfHealthConv: { base:1.35, per:0.3, stat:'MATK' },
+  // ---- Sniper ----
+  snSharpShooting: { base:2.2, per:0.48 },
+  snTripleAction: { base:4.08, per:0.9, hits:6 },
+  snArrowVulcan: { base:1.4, per:0.32 },
+  snFocusedArrow: { base:1.9, per:0.4 },
+  // ---- Clown ----
+  clArrowVulcanX: { base:2.1, per:0.46 },
+  clMusicalStrike: { base:3.4, per:0.75, hits:5 },
+  clFrostJokeX: { base:1.35, per:0.3 },
+  clTarotCard: { base:1.6, per:0.4 },
+  // ---- Whitesmith ----
+  wsCartTermination: { base:2.6, per:0.56 },
+  wsHammerFall: { base:1.45, per:0.33 },
+  wsMeltdown: { base:3.5, per:0.75, hits:5 },
+  wsMaximizePower: { base:1.9, per:0.4 },
+  // ---- Creator ----
+  crAcidBomb: { base:2.5, per:0.54, stat:'MATK' },
+  crAcidSprayX: { base:1.5, per:0.34, stat:'MATK' },
+  crSulfurFumeX: { base:1.35, per:0.3, stat:'MATK' },
+  crBioCannibalize: { base:1.8, per:0.38 },
+  // ---- Rune Knight ----
+  rkDragonBreath: { base:1.2, per:0.25 },
+  rkIgnitionBreak: { base:1.6, per:0.34 },
+  rkSonicWave: { base:2.3, per:0.5 },
+  rkWindCutter: { base:1.3, per:0.3 },
+  rkStormBlast: { base:3.4, per:0.72, hits:4 },
+  // ---- Royal Guard ----
+  rgOverbrand: { base:1.7, per:0.38 },
+  rgCannonSpear: { base:1.5, per:0.34 },
+  rgShieldPress: { base:1, per:0.22 },
+  rgVanishingPoint: { base:2, per:0.44 },
+  rgMoonSlasher: { base:1.4, per:0.32 },
+  // ---- Arch Bishop ----
+  abAdoramus: { base:2.6, per:0.58, stat:'MATK' },
+  abJudex: { base:1.6, per:0.36, stat:'MATK' },
+  // ---- Sura ----
+  suTigerCannon: { base:1.8, per:0.4 },
+  suGateOfHell: { base:5, per:1.15 },
+  suRampageBlaster: { base:1.9, per:0.42 },
+  suKnuckleArrow: { base:2.2, per:0.48 },
+  suSkyNetBlow: { base:1.2, per:0.28 },
+  suFallenEmpire: { base:3.6, per:0.8, hits:4 },
+  // ---- Warlock ----
+  wlComet: { base:3.4, per:0.8, stat:'MATK' },
+  wlChainLightning: { base:1.8, per:0.4, stat:'MATK' },
+  wlCrimsonRock: { base:2.2, per:0.5, stat:'MATK' },
+  wlJackFrost: { base:2, per:0.46, stat:'MATK' },
+  wlSoulExpansion: { base:2.5, per:0.55, stat:'MATK' },
+  wlTetraVortex: { base:4.4, per:1.04, hits:4 },
+  // ---- Sorcerer ----
+  scPsychicWave: { base:2, per:0.46, stat:'MATK' },
+  scEarthGrave: { base:1.9, per:0.42, stat:'MATK' },
+  scDiamondDust: { base:1.8, per:0.42, stat:'MATK' },
+  scVaretyrSpear: { base:2.4, per:0.52, stat:'MATK' },
+  // ---- Guillotine Cross ----
+  gxCrossImpact: { base:1.54, per:0.7, hits:7 },
+  gxCounterSlash: { base:2.85, per:0.63, hits:3 },
+  gxPhantomMenace: { base:1.5, per:0.34 },
+  gxRollingCutter: { base:1.2, per:0.28 },
+  gxVenomPressure: { base:1.6, per:0.36 },
+  // ---- Shadow Cross ----
+  sxSavageImpact: { base:6.8, per:1.5, hits:4 },
+  sxShadowStab: { base:5.4, per:1.24 },
+  sxImpactCrater: { base:4.5, per:1.04 },
+  sxDarkClaw: { base:3.2, per:0.72 },
+  // ---- Dragon Knight ----
+  dkDragonBreath: { base:4.6, per:1.05 },
+  dkHackAndSlasher: { base:7.8, per:1.9, hits:2 },
+  dkStormSlash: { base:10.8, per:2.48, hits:4 },
+  dkMadnessCrusher: { base:5.2, per:1.2 },
+  // ---- Cardinal ----
+  cdArbitrium: { base:4.3, per:0.98, stat:'MATK' },
+  cdFrancisca: { base:6.2, per:1.35, stat:'MATK' },
+  // ---- Archmage ----
+  amClimaxStorm: { base:4.8, per:1.1, stat:'MATK' },
+  amFrozenSlash: { base:6.8, per:1.45, stat:'MATK' },
+  amRainOfCrystal: { base:12, per:2.8, hits:5, stat:'MATK' },
+  amViolentQuake: { base:3.6, per:0.84, stat:'MATK' },
+  // ---- Windhawk ----
+  whCalamityGale: { base:4.4, per:1.02 },
+  whGaleStorm: { base:6.4, per:1.4, hits:3 },
+  whCrescive: { base:5.6, per:1.28 },
+  whHawkRush: { base:8.7, per:2.04, hits:3 },
+  // ---- Abyss Chaser ----
+  abAbyssSquare: { base:4.2, per:0.95, stat:'MATK' },
+  abFrenzyShot: { base:6.5, per:1.4, hits:3, stat:'MATK' },
+  abDeftStab: { base:3.8, per:0.85, stat:'MATK' },
+  abChainReaction: { base:9, per:2.1, hits:3, stat:'MATK' },
+  // ---- Shadow Chaser ----
+  shFatalMenace: { base:1.7, per:0.38 },
+  shTriangleShot: { base:2.85, per:0.66, hits:3 },
+  shFeintBomb: { base:1.6, per:0.36 },
+  shShadowSpell: { base:2.3, per:0.5, stat:'MATK' },
+  shManholeTrap: { base:1.4, per:0.32 },
+  // ---- Ranger ----
+  raArrowStorm: { base:1.9, per:0.44 },
+  raAimedBolt: { base:3.2, per:0.72 },
+  raElectricShocker: { base:1.5, per:0.34 },
+  raClusterBomb: { base:1.7, per:0.38 },
+  raSharpShooting: { base:3, per:0.69, hits:3 },
+  raWargStrike: { base:2.4, per:0.54 },
+  // ---- Minstrel ----
+  miSevereRainstorm: { base:1.8, per:0.4 },
+  miReverberation: { base:1.7, per:0.38 },
+  miMetallicSound: { base:1.6, per:0.36, stat:'MATK' },
+  miDominionImpulse: { base:1.4, per:0.32 },
+  // ---- Mechanic ----
+  meArmCannon: { base:2, per:0.46 },
+  meVulcanArm: { base:4.2, per:0.96, hits:6 },
+  meKnuckleBoost: { base:2.3, per:0.5 },
+  meAxeTornado: { base:1.8, per:0.4 },
+  meAxeBoomerang: { base:2.5, per:0.55 },
+  meSelfDestruction: { base:2.4, per:0.55 },
+  // ---- Genetic ----
+  geCartCannon: { base:1.9, per:0.42 },
+  geCrazyWeed: { base:1.8, per:0.4 },
+  geSporeExplosion: { base:1.7, per:0.38 },
+  geHellPlant: { base:1.6, per:0.36 },
+  geAcidBomb: { base:2.8, per:0.62 },
+  geThornTrap: { base:1.4, per:0.32 },
 };
 // คืนค่า % ดาเมจของสกิลที่เลเวลหนึ่งๆ (เทียบกับการตีธรรมดา = 100%)
 function skillDmgPct(key, lv) {
   const d = SKILL_DMG[key];
   if (!d) return null;
   return Math.round((d.base + lv*d.per) * 100);
+}
+// ค่าสถิติที่สกิลใช้คิดดาเมจ — สายเวทอิง MATK ไม่ใช่ ATK
+function skillDmgStat(key) {
+  const d = SKILL_DMG[key];
+  return (d && d.stat) ? d.stat : 'ATK';
+}
+// สกิลตีหลายนัด: % ที่แสดงเป็นยอดรวมทุกนัดแล้ว
+function skillDmgHits(key) {
+  const d = SKILL_DMG[key];
+  return (d && d.hits) ? d.hits : 1;
 }
 // สกิลที่มีดาเมจบวกเพิ่มนอกเหนือจาก ATK% (เช่นอิงจาก Zeny/จำนวนของ)
 // % ที่แสดงจึงเป็นแค่ส่วนฐาน ดาเมจจริงจะสูงกว่านี้
@@ -9958,6 +10158,8 @@ function playSkillFx(key, target) {
 }
 
 let castingSkill = false;
+let skillCritWindow = 0;    // ถึงเวลานี้ ดาเมจที่เข้ามายังนับว่ามาจากสกิล (กันฮิตหน่วงเวลาหลุด)
+let noSkillCrit = false;    // true = ดาเมจก้อนนี้ทอยคริมาเองแล้ว หรือไม่ใช่ดาเมจจากสกิลผู้เล่น
 // ---- ระบบเวลาร่ายเวท (แบบ Ragnarok) เฉพาะสายเวทที่ใช้ MATK ----
 // เวทแรง = ร่ายนาน, INT+DEX ยิ่งเยอะยิ่งร่ายเร็ว, ไม่มีร่ายล่มตอนโดนตี
 const CAST_STAT_FULL = 300;   // INT+DEX รวมเท่านี้ = ร่ายเร็วสุด (เหลือ 10% ของเวลาฐาน)
@@ -10026,7 +10228,7 @@ function castSkill(key, cls) {
   castingSkill = true;
   const ok = def.cast(lv);
   castingSkill = false;
-  if (ok !== false) { playSkillFx(key, player.target); player.sp -= Math.round(spCost*hcSpCostMul()); applyEchoingMana(spCost); player.skillCooldowns[key] = Math.round(def.cd(lv)*hcCooldownMul()); updateHUD(); }
+  if (ok !== false) { playSkillFx(key, player.target), skillCritWindow = performance.now() + 900; player.sp -= Math.round(spCost*hcSpCostMul()); applyEchoingMana(spCost); player.skillCooldowns[key] = Math.round(def.cd(lv)*hcCooldownMul()); updateHUD(); }
   refreshQuickBtn();
 }
 // ใช้โดยระบบ ออโต้ตี: พยายามใช้สกิลเงียบๆ ถ้าพร้อม (ไม่ log แจ้งเตือนตอนยังไม่พร้อมเหมือนกดเอง)
@@ -10081,7 +10283,7 @@ function tryAutoCastSkill(key, conditionFn, cls) {
   castingSkill = true;
   const ok = def.cast(lv);
   castingSkill = false;
-  if (ok !== false) playSkillFx(key, player.target);
+  if (ok !== false) { skillCritWindow = performance.now() + 900; playSkillFx(key, player.target); }
   if (ok !== false) { player.sp -= Math.round(spCost*hcSpCostMul()); applyEchoingMana(spCost); player.skillCooldowns[key] = Math.round(def.cd(lv)*hcCooldownMul()); updateHUD(); refreshQuickBtn(); return true; }
   return false;
 }
@@ -10234,8 +10436,8 @@ function openSkillTree(cls) {
     const canInvest = met && lv < def.maxLv && player.skillPoints > 0;
     const isAuto = autoSlots.includes(def.key);
     html += `<div class="skillRow ${met?'':'locked'}">
-      <div class="skillTop"><b>${def.name}</b><span class="skillTag ${def.type==='active'?'tag-active':'tag-passive'}">${def.type==='active'?'Active':'Passive'}</span>${SKILL_DMG[def.key]?`<span class="skillTag" style="background:#4a2a1a;color:#ffb86a" title="ดาเมจเทียบกับการตีธรรมดา (100%)">💥 ${skillDmgPct(def.key, Math.max(1,lv))}%${SKILL_DMG_BONUS[def.key]?'+':''}</span>`:''}</div>
-      <div class="skillDesc">${def.desc}${SKILL_DMG[def.key]?`<br><span style="color:#e0a068">ดาเมจ ${skillDmgPct(def.key,Math.max(1,lv))}% ของ ATK${lv<def.maxLv?` → เต็มเลเวล ${skillDmgPct(def.key,def.maxLv)}%`:''}${SKILL_DMG_BONUS[def.key]?` <span style="color:#8ad0a0">(+ดาเมจเพิ่ม${SKILL_DMG_BONUS[def.key]})</span>`:''}</span>`:''}</div>
+      <div class="skillTop"><b>${def.name}</b><span class="skillTag ${def.type==='active'?'tag-active':'tag-passive'}">${def.type==='active'?'Active':'Passive'}</span>${SKILL_DMG[def.key]?`<span class="skillTag" style="background:#4a2a1a;color:#ffb86a" title="ดาเมจรวมของสกิลนี้ เทียบกับการตีธรรมดา 1 ครั้ง (100%)">💥 ${skillDmgPct(def.key, Math.max(1,lv))}%${SKILL_DMG_BONUS[def.key]?'+':''}${skillDmgHits(def.key)>1?` <span style="opacity:.75">x${skillDmgHits(def.key)}</span>`:''}</span>`:''}</div>
+      <div class="skillDesc">${def.desc}${SKILL_DMG[def.key]?`<br><span style="color:#e0a068">ดาเมจ ${skillDmgPct(def.key,Math.max(1,lv))}% ของ ${skillDmgStat(def.key)}${skillDmgHits(def.key)>1?` (รวม ${skillDmgHits(def.key)} นัด)`:''}${lv<def.maxLv?` → เต็มเลเวล ${skillDmgPct(def.key,def.maxLv)}%`:''}${SKILL_DMG_BONUS[def.key]?` <span style="color:#8ad0a0">(+ดาเมจเพิ่ม${SKILL_DMG_BONUS[def.key]})</span>`:''}</span>`:''}</div>
       <div class="skillFoot">
         <span class="lvDots">Lv. ${lv} / ${def.maxLv}</span>
         ${!met ? `<span class="reqText">ต้องการ ${skillNameByKey(def.req.key, viewCls)} Lv.${def.req.lv}</span>` : ''}
@@ -16161,6 +16363,13 @@ function dealDamage(m, dmg, crit, style) {
     player.attackFlashUntil = performance.now() + _dur;
   }
   if (castingSkill) dmg = Math.round(dmg * skillDamageMul());
+  // ---- ดาเมจจากสกิลทอยคริติคอลได้ ----
+  // ครอบฮิตที่หน่วงด้วย setTimeout ด้วย (สกิลตีหลายนัดอย่าง Savage Impact)
+  // noSkillCrit กันดาเมจที่ทอยคริมาเองแล้ว (ตีธรรมดา/มือรอง/ปาร์ตี้/เพ็ท) ไม่ให้ถูกคูณคริซ้ำ
+  if (SKILL_CRIT_ENABLED && !noSkillCrit && (castingSkill || performance.now() < skillCritWindow)) {
+    if (Math.random() < critChance()) { dmg = Math.round(dmg * critMultiplier()); crit = true; }
+    else crit = false;
+  }
   if (arcaneScale !== 1) dmg = Math.max(1, Math.round(dmg * arcaneScale));   // สกิลจากเซ็ต Arcanist
   { const bm = berserkerMul(m); if (bm !== 1) dmg = Math.round(dmg * bm); }   // เซ็ต Berserker: ประชิดยิ่งแรง
   if (m.provokedUntil && performance.now() < m.provokedUntil) dmg = Math.round(dmg*(1+(m.provokeBonus||0)));
@@ -25054,18 +25263,18 @@ function update(dt, now) {
             }
             const isCrit = Math.random() < critChance();
             if (isCrit) dmg = Math.round(dmg*critMultiplier());
-            dealDamage(t, dmg, isCrit);
+            noSkillCrit = true; dealDamage(t, dmg, isCrit); noSkillCrit = false;
             if (offDmg > 0) queueOffhandHit(t, offDmg);
             if (player.className==='Thief' && Math.random() < getSkillLv('doubleAtk')*0.14 && t.alive) {
               // ตีซ้ำ: ทอยคริติคอลแยกของตัวเอง และแสดงเป็นเลขเหลืองแบบ RO
               let d2 = Math.round(dmg*0.6);
               const c2 = Math.random() < critChance();
               if (c2) d2 = Math.round(d2*critMultiplier());
-              dealDamage(t, Math.max(1, d2), c2, 'double');
+              noSkillCrit = true; dealDamage(t, Math.max(1, d2), c2, 'double'); noSkillCrit = false;
               log('Double Attack!','hit');
             }
             if (player.className==='Monk' && Math.random() < getSkillLv('tripleAttack')*0.05 && t.alive) {
-              const d2 = Math.round(dmg*0.5); dealDamage(t, d2); if (t.alive) dealDamage(t, d2); log('Triple Attack!','hit');
+              const d2 = Math.round(dmg*0.5); noSkillCrit = true; dealDamage(t, d2); if (t.alive) dealDamage(t, d2); noSkillCrit = false; log('Triple Attack!','hit');
             }
             if (player.className==='Assassin' && getSkillLv('enchantPoison')>0 && Math.random() < 0.15+getSkillLv('enchantPoison')*0.05 && t.alive) {
               t.poison=getSkillLv('enchantPoison'); t.poisonTicks=3; t.poisonTimer=1000; t.poisonDmg=Math.round(attackPower()*0.1);
@@ -25081,9 +25290,12 @@ function update(dt, now) {
       if (best && bd < 60) player.target = best;
     }
     if (player.atkCooldown>0) player.atkCooldown -= dt;
+    // ดาเมจของมือรอง/ปาร์ตี้/เพ็ท ทอยคริของตัวเองอยู่แล้ว ไม่ให้ระบบคริสกิลไปคูณซ้ำ
+    noSkillCrit = true;
     processOffhandQueue();
     updateParty(dt);
     updatePet(dt);
+    noSkillCrit = false;
     resolveBossTelegraphs();
     updateDungeonObjects(dt);
     // พิษจากมินิบอส Nyxreth
