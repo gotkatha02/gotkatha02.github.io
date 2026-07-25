@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
-<title>Aldebrandt Online v4.22</title>
+<title>Aldebrandt Online</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: 'Trebuchet MS', 'Segoe UI', sans-serif; background: #1b1f16; color: #e8dcc0; display: flex; justify-content: center; padding: 16px; touch-action: pan-y; }
@@ -7563,7 +7563,67 @@ function equipBonus(key) {
   }
   return sum;
 }
-function effStat(key){ return player.stats[key] + equipBonus(key); }
+const STAT_PASSIVE_MAP = {
+  str: ['berserkPotion','cavalryTraining','chStrX','devotion','hiltBinding','lkStrX','plStrX','steelCrow','wsStrX','xStrX'],
+  agi: ['adrenalineRush','chAgiX','clAgiX','enchantDeadlyPoison','improveConcealment','removeTrap','scAgiX','snAgiX','spearQuicken','xAgiX'],
+  vit: ['chemicalProtection','guardMonk','hpVitStat','impressiveRiposte','ironWill','lkVitX','pfVitX','plVitX','providence','redemptio','wsVitStat'],
+  int: ['aspersio','crIntX','hpIntX','hwIntX','mentality','pfIntX','poemOfBragi'],
+  dex: ['clDexX','concentration','crDexX','freezingTrap','humming','hwDexX','pfDexX','righteousHands','snDexX','springTrap','suffragium','weaponResearch'],
+  luk: ['musicLesson','scLukX','sereneMind'],
+};
+const ASPD_PAS = ['geCartBoost','gxAspdX','meAspdX','miAspdX','raAspdX','shAspdX','suAspdX','wlAspdX','rgAspdX'];
+const CRIT_PAS2 = ['abLaudaRamus','geIllusionDoping','gxAdvancedKatar','miEncore','raCritX','scCritX'];
+const CRITDMG_PAS2 = ['gxEnchantDeadlyPoison','meCritMaster'];
+const REDUCE_PAS2 = ['abSanctity','rgForceVanguard','scElementalShield','spellBreaker','wlArcaneShield'];
+const DMG_PAS2 = ['abExpiatio','gxWeaponCrush','gxVenomImpress','meAxeMastery','miMelodySink','shDivest'];
+const FLEE_PAS2 = ['gxShadowWalk','shShadowForm','suSprintMastery'];
+const SKILLDMG_PAS2 = ['geFireExpansion','raTrapResearch','shReproduce'];
+const MATK_PAS2 = ['wlStasis'];
+const GOLD_PAS2 = ['geChangeMaterial','nvLucky'];
+const CD_PAS2 = ['meEmergencyCool'];
+const SPCOST_PAS2 = ['scArcaneFlow'];
+const ATK_PAS3 = ['meMadogearLicense','raWargMastery','rgRoyalAura','rkRuneMastery'];
+const HP_PAS3 = ['rgFaithX','rkVitalityX','suRisingDragon'];
+const CRIT_PAS3 = ['raCamouflage'];
+const CRITDMG_PAS3 = ['rkAbyssMastery','wlFrostMastery'];
+const DEF_PAS3 = ['rgGuardMastery'];
+const MATK_PAS3 = ['scElementalMastery','wlRecognizedSpell','rkEnchantBlade','scSpellFist'];
+const CD_PAS3 = ['rkDragonTraining'];
+const ASPD_PAS3 = ['suRisingDragon'];
+const ALLSTAT_PAS = ['miHarmonize'];
+const FLEEHIT_PAS = ['nvBasic'];
+const ATK_PAS4 = ['rkGiantGrowth','raFearBreeze'];
+const SKILLDMG_PAS4 = ['wlRadius'];
+function fightingSpiritAtk() {
+  var lv = getSkillLv('suFightingSpirit');
+  if (!lv) return 0;
+  var lost = 1 - (player.hp / Math.max(1, player.maxHp));
+  return lv * 0.06 * lost;
+}
+function sumPas(list) {
+  var n = 0;
+  for (var i = 0; i < list.length; i++) n += getSkillLv(list[i]);
+  return n;
+}
+function pctPassive(list, per) {
+  var n = 0;
+  for (var i = 0; i < list.length; i++) n += getSkillLv(list[i]);
+  return n * per;
+}
+const HP_PCT_3 = ['abVitX','geVitX','meVitX','scVitX','shVitX','suVitX','wlVitX'];
+const HP_PCT_2 = ['miVitX','raVitX','rgVitX'];
+const SP_PCT_4 = ['abSpX','miSpX','scSpX','wlSpX'];
+const SP_PCT_3 = ['geSpX','suSpX'];
+function hpPassivePct() { return pctPassive(HP_PCT_3, 0.03) + pctPassive(HP_PCT_2, 0.02) + pctPassive(HP_PAS3, 0.03); }
+function spPassivePct() { return pctPassive(SP_PCT_4, 0.04) + pctPassive(SP_PCT_3, 0.03); }
+function statPassiveBonus(key) {
+  var arr = STAT_PASSIVE_MAP[key];
+  if (!arr) return 0;
+  var n = 0;
+  for (var i = 0; i < arr.length; i++) n += getSkillLv(arr[i]);
+  return n;
+}
+function effStat(key){ return player.stats[key] + equipBonus(key) + statPassiveBonus(key) + sumPas(ALLSTAT_PAS); }
 
 // ============ RO CLASSIC STAT SYSTEM ============
 // อิงสูตร Ragnarok Online Classic (Pre-Renewal) ปรับสเกลให้เข้ากับ balance ของเกมนี้
@@ -7614,6 +7674,8 @@ function attackPower() {
   base *= 1 + getSkillLv('dkDragonicAura') * 0.08;
   base *= 1 + getSkillLv('whWindSign') * 0.08;
   base *= 1 + getSkillLv('sxWeaponBlocking') * 0.08;
+  base *= 1 + sumPas(ATK_PAS3) * 0.035;
+  base *= 1 + sumPas(ATK_PAS4) * 0.03 + fightingSpiritAtk();
   base *= 1 + highBonus('atk')*0.15;   // High Class: พลังโจมตี
   base *= 1 + passiveLv(AUTOATK_PASSIVE_KEYS)*0.04;   // High Class: ดาเมจโจมตีปกติ
   base *= 1 + equipPctBonus('atkPct')/100;
@@ -7737,7 +7799,8 @@ function attackInterval() {
   mul *= Math.pow(0.981, passiveLv(ASPD2_PASSIVE_KEYS));         // passive รอง: -1.9% ต่อเลเวล
   if (now < player.concUntil) mul *= Math.pow(0.962, player.concBonus);  // บัฟเร่งความเร็ว: -3.8%
   mul *= Math.pow(0.960, petBonus('aspd'));
-  mul *= Math.pow(0.960, rogueBuffTotal('aspd'));                      // เพ็ท: -4.0%
+  mul *= Math.pow(0.960, rogueBuffTotal('aspd'));
+  mul *= Math.pow(0.985, sumPas(ASPD_PAS) + sumPas(ASPD_PAS3));                      // เพ็ท: -4.0%
   mul *= 1 - Math.min(0.4, bossEffectTotal('bsAspd')/100);      // ASPD% พิเศษบอส
   mul *= 1 - highBonus('aspd')*0.12;                             // High Class: ความเร็วโจมตี
   iv *= mul;
@@ -7755,7 +7818,7 @@ function critChance() {
   c += equipBonus('crit')*0.01 + getSkillLv('backstab')*0.02 + getSkillLv('sharp')*0.015;
   c += petBonus('crit')*0.01;                        // โบนัสจากเพ็ท
   if (critKey) c += getSkillLv(critKey)*0.015;
-  c += getSkillLv('whHawkMastery')*0.05 + rogueBuffTotal('crit')/100;
+  c += getSkillLv('whHawkMastery')*0.05 + rogueBuffTotal('crit')/100 + sumPas(CRIT_PAS2)*0.02 + sumPas(CRIT_PAS3)*0.03;
   if (now < player.furyUntil) c += player.furyBonus;
   c += getPathSkillLv('criticalFocus')*0.03*(player.sp/Math.max(1,player.maxSp));
   let _c = (Math.min(0.85, c)); if (typeof pbActive==='function') _c += pbActive('critPct')/100; return Math.min(1, _c);
@@ -7764,11 +7827,11 @@ function critChance() {
 // ---- ตัวช่วยเอฟเฟกต์ High Class ----
 function hcLifestealPct()  { return passiveLv(LIFESTEAL_PASSIVE_KEYS)*0.02; }
 function hcHealPowerMul()  { return 1 + passiveLv(HEALPOWER_PASSIVE_KEYS)*0.10; }
-function hcSpCostMul()     { return Math.max(0.5, 1 - passiveLv(SPCOST_PASSIVE_KEYS)*0.04); }
-function hcCooldownMul()   { return Math.max(0.6, 1 - passiveLv(COOLDOWN_PASSIVE_KEYS)*0.03); }
+function hcSpCostMul()     { return Math.max(0.5, 1 - passiveLv(SPCOST_PASSIVE_KEYS)*0.04 - sumPas(SPCOST_PAS2)*0.04); }
+function hcCooldownMul()   { return Math.max(0.6, 1 - passiveLv(COOLDOWN_PASSIVE_KEYS)*0.03 - sumPas(CD_PAS2)*0.03 - sumPas(CD_PAS3)*0.03); }
 function hcPoisonMul()     { return 1 + passiveLv(POISONDMG_PASSIVE_KEYS)*0.08; }
-function hcGoldMul()       { return 1 + passiveLv(GOLD_PASSIVE_KEYS)*0.08; }
-function critMultiplier() { const dunCd = (typeof dunSetBonusStats === 'function') ? dunSetBonusStats().critDmgPct/100 : 0; return 1.8 + effStat('luk')*0.003 + achBonus('critDmg') + petBonus('critDmg') + highBonus('critDmg')*0.5 + getPathSkillLv('deadlyPrecision')*0.08 + passiveLv(CRITDMG_PASSIVE_KEYS)*0.06 + bossEffectTotal('critDmg')*0.01 + rogueBuffTotal('critDmg')/100 + getSkillLv('sxCrossRipper')*0.12 + dunCd; }
+function hcGoldMul()       { return 1 + passiveLv(GOLD_PASSIVE_KEYS)*0.08 + sumPas(GOLD_PAS2)*0.06; }
+function critMultiplier() { const dunCd = (typeof dunSetBonusStats === 'function') ? dunSetBonusStats().critDmgPct/100 : 0; return 1.8 + effStat('luk')*0.003 + achBonus('critDmg') + petBonus('critDmg') + highBonus('critDmg')*0.5 + getPathSkillLv('deadlyPrecision')*0.08 + passiveLv(CRITDMG_PASSIVE_KEYS)*0.06 + bossEffectTotal('critDmg')*0.01 + rogueBuffTotal('critDmg')/100 + getSkillLv('sxCrossRipper')*0.12 + sumPas(CRITDMG_PAS2)*0.08 + sumPas(CRITDMG_PAS3)*0.07 + dunCd; }
 
 // ---- Perfect Dodge: LUK 0.1% ต่อแต้ม หลบได้แม้ HIT ศัตรูจะสูงแค่ไหน ----
 function perfectDodgeChance() { return Math.min(0.25, effStat('luk')*0.001); }
@@ -7778,7 +7841,7 @@ function hitValue()  { return Math.round(effStat('dex') + player.level + getSkil
 function fleeValue() {
   const fleeKey = FLEE_PASSIVE_KEYS[player.className];
   let f = effStat('agi') + player.level;
-  f += getSkillLv('dodge')*3 + getSkillLv('windwalk')*2;
+  f += getSkillLv('dodge')*3 + getSkillLv('windwalk')*2 + sumPas(FLEE_PAS2)*4 + sumPas(FLEEHIT_PAS)*5;
   if (fleeKey) f += getSkillLv(fleeKey)*2;
   f += passiveLv(FLEE2_PASSIVE_KEYS)*2;
   if (nvLv('nvBasic')) f += 5;
@@ -7835,6 +7898,8 @@ function matkMax() {
   base *= 1 + getSkillLv('abAbyssDagger') * 0.08;
   base *= 1 + getSkillLv('cdReligio') * 0.08;
   base *= 1 + getSkillLv('amMysteryIllusion') * 0.08;
+  base *= 1 + sumPas(MATK_PAS2) * 0.05;
+  base *= 1 + sumPas(MATK_PAS3) * 0.045;
   return Math.round(base);
 }
 function matkValue() { return matkMax(); }
@@ -7849,8 +7914,8 @@ function baseMaxSp() { return player.baseSp || 40; }
 function recalcMaxHpSp(keepRatio) {
   const hpRatio = player.maxHp ? player.hp/player.maxHp : 1;
   const spRatio = player.maxSp ? player.sp/player.maxSp : 1;
-  const hpPas = (passiveLv(MAXHP_PASSIVE_KEYS) + passiveLv(MAXHP2_PASSIVE_KEYS))*0.02;
-  const spPas = (passiveLv(MAXSP_PASSIVE_KEYS) + passiveLv(MAXSP2_PASSIVE_KEYS))*0.02;
+  const hpPas = (passiveLv(MAXHP_PASSIVE_KEYS) + passiveLv(MAXHP2_PASSIVE_KEYS))*0.02 + hpPassivePct();
+  const spPas = (passiveLv(MAXSP_PASSIVE_KEYS) + passiveLv(MAXSP2_PASSIVE_KEYS))*0.02 + spPassivePct();
   const dunHpPct = (typeof dunSetBonusStats === 'function') ? dunSetBonusStats().hpPct/100 : 0;
   const nvHp = nvLv('nvEndurance') ? 0.05 : 0;    // Novice: Endurance
   const nvSp = nvLv('nvMeditation') ? 0.05 : 0;   // Novice: Meditation
@@ -9678,7 +9743,7 @@ function refreshQuickBtn() {
   quickBtn.disabled = cd>0;
   quickBtn.innerHTML = `${def.name} Lv.${lv} ${cd>0? '('+Math.ceil(cd/1000)+'s)':''}<small>${def.desc}</small>`;
 }
-function skillDamageMul() { return 1 + passiveLv(SKILLDMG_PASSIVE_KEYS)*0.04 + bossEffectTotal('skillDmg')*0.01 + getSkillLv('abShadowExceed')*0.05 + getSkillLv('dkVigor')*0.05 + getSkillLv('cdBenedictum')*0.05 + getSkillLv('amSpellEnchant')*0.05 + getSkillLv('whDeepBlind')*0.05 + getSkillLv('sxPoisonMastery')*0.05 + rogueBuffTotal('skillDmg')/100 + equipPctBonus('skillDmg')/100; }
+function skillDamageMul() { return 1 + passiveLv(SKILLDMG_PASSIVE_KEYS)*0.04 + bossEffectTotal('skillDmg')*0.01 + getSkillLv('abShadowExceed')*0.05 + getSkillLv('dkVigor')*0.05 + getSkillLv('cdBenedictum')*0.05 + getSkillLv('amSpellEnchant')*0.05 + getSkillLv('whDeepBlind')*0.05 + getSkillLv('sxPoisonMastery')*0.05 + sumPas(SKILLDMG_PAS2)*0.05 + sumPas(DMG_PAS2)*0.04 + sumPas(SKILLDMG_PAS4)*0.04 + rogueBuffTotal('skillDmg')/100 + equipPctBonus('skillDmg')/100; }
 function effectiveSpCost(rawCost) { return Math.max(1, Math.round(rawCost * (1 - getPathSkillLv('manaConservation')*0.03 - Math.min(0.5, bossEffectTotal('spCost')*0.01)))); }
 function applyEchoingMana(spCost) { if (getPathSkillLv('echoingMana')>0 && Math.random() < 0.2) { player.sp = Math.min(player.maxSp, player.sp + spCost); spawnFloatText(player.x, player.y-30, 'MANA ECHO!', '#a0d0ff'); } }
 
@@ -9704,7 +9769,7 @@ const SKILL_FX = {
   kyrie:'fx_shield', sanctuary:'fx_holy', angelus:'fx_shield', blessing:'fx_shield',
   // --- มืด/ไร้ธาตุ ---
   soulstrike:'fx_void', soulBreaker:'fx_void', marshOfAbyss:'fx_void',
-  occultImpact:'fx_void', asuraStrike:'fx_void',
+  occultImpact:'fx_void',   // asuraStrike ถูกกำหนดเป็น fx_bigboom ด้านล่าง (คีย์ซ้ำเดิมถูกลบออก)
   // --- พิษ/กรด ---
   envenom:'fx_poison', venomDust:'fx_poison', acidBottle:'fx_poison',
   grimtooth:'fx_poison', sandman:'fx_poison',
@@ -15517,6 +15582,10 @@ function dealDamage(m, dmg, crit, style) {
   if (m && m.darkClawUntil && performance.now() < m.darkClawUntil) dmg = Math.round(dmg * (1 + (m.darkClawPct || 0)));
   if (m && m.isFinalBoss) { try { finalBossPhaseCheck(m); } catch(e) {} }
   // High Class: ดูดเลือดจากดาเมจที่ทำได้
+  var _rf = getSkillLv('rgShieldSpell');
+  if (_rf > 0 && m && dmg > 0) { try { m.hp -= Math.round(dmg * _rf * 0.03); if (m.hp <= 0) m.alive = false; } catch(e){} }
+  var _ab = getSkillLv('suPowerAbsorb');
+  if (_ab > 0 && dmg > 0 && Math.random() < _ab * 0.05) player.sp = Math.min(player.maxSp, player.sp + Math.round(player.maxSp * 0.02));
   const _ls = ((typeof hcLifestealPct === 'function') ? hcLifestealPct() : 0) + rogueBuffTotal('lifesteal')/100;
   if (_ls > 0 && dmg > 0 && player.hp < player.maxHp) {
     player.hp = Math.min(player.maxHp, player.hp + Math.max(1, Math.round(dmg * _ls)));
@@ -15844,7 +15913,7 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
 
     // ตารางดรอปของบอส/มินิบอส (Illunium + วัตถุดิบคราฟ + หินสุ่มออฟ + ของซ่อม)
     if (m.isBoss) {
-      // มอน/บอสในหอคอย: เพิ่มเรทดรอปของคราฟ x3 (reroll/exalt/annul/essence/corrupt/repair)
+      // มอน/บอสในหอคอย: เพิ่มเรทดรอปของคราฟ x2 ตาม dropMul (reroll/exalt/annul/essence/corrupt/repair)
       const CRAFT_KEYS_BOOST = ['reroll_stone','exalt_orb','annul_orb','essence_orb','corrupt_stone','repair_kit','repair_hammer'];
       BOSS_DROPS.forEach(bd => {
         let ch = bd.chance;
@@ -15852,10 +15921,9 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
         if (Math.random() >= ch) return;
         const n = bd.min + Math.floor(Math.random()*(bd.max-bd.min+1));
         addMat(bd.key, n);
-        const nm = bd.key==='illunium_s' ? ILLUNIUM.small.name
-                 : bd.key==='illunium_m' ? ILLUNIUM.medium.name
-                 : bd.key==='reroll_stone' ? REROLL_STONE.name
-                 : REPAIR_HAMMER.name;
+        // ใช้ materialInfo() ให้ครอบทุกคีย์ (เดิมตกไปที่ค้อนซ่อมหมด ทำให้ชื่อในล็อกผิด)
+        const nmInfo = materialInfo(bd.key);
+        const nm = (nmInfo && nmInfo.name) ? nmInfo.name : bd.key;
         dropMsg += ` | ${nm} x${n}`;
       });
       // ของบอส: โอกาส 15% ดรอปตรงจากการฆ่า (แทนระบบคราฟเดิม)
@@ -24303,10 +24371,14 @@ function loop(now) { const dt = Math.min(50, now-last); last = now;
   const inGame = !!(player && player.className);
   const runUpdate = !player.hardPause && (!player.paused || inGame);
   try { if (runUpdate) update(dt, now); } catch(e) { console.error('update error:', e); }
-  try { render(); } catch(e) { console.error('render error:', e); } // ---- หน้าโหลดเข้าเกม: วิ่งเปอร์เซ็นต์แล้วค่อยจางหาย ----
+  try { render(); } catch(e) { console.error('render error:', e); }
+  requestAnimationFrame(loop);
+}
+
+// ---- หน้าจอโหลดเข้าเกม: วิ่งเปอร์เซ็นต์แล้วค่อยจางหาย (ต้องรันครั้งเดียว ไม่อยู่ใน loop) ----
 (function runLoader(){
   var scr = document.getElementById('loadScreen');
-  if (!scr) { requestAnimationFrame(loop); return; }
+  if (!scr) return;
   var fill = document.getElementById('loadBarFill');
   var pctEl = document.getElementById('loadPct');
   var pct = 0;
@@ -24325,7 +24397,6 @@ function loop(now) { const dt = Math.min(50, now-last); last = now;
     }
   }, 120);
 })();
-requestAnimationFrame(loop); }
 
 function update(dt, now) {
   let mvx=0, mvy=0;
@@ -24530,7 +24601,7 @@ function update(dt, now) {
               if (player.className==='Mage') raw = Math.round(raw * (1 - getSkillLv('shield')*0.02));
               // Pain Resistance / Mystic Aura: ลดดาเมจที่ได้รับ
               raw = Math.round(raw * (1 - getPathSkillLv('painResistance')*0.02) * (1 - getPathSkillLv('mysticAura')*0.02));
-              raw = Math.round(raw * (1 - (passiveLv(REDUCE_PASSIVE_KEYS)+passiveLv(REDUCE2_PASSIVE_KEYS))*0.025));
+              raw = Math.round(raw * (1 - Math.min(0.7, (passiveLv(REDUCE_PASSIVE_KEYS)+passiveLv(REDUCE2_PASSIVE_KEYS))*0.025 + sumPas(REDUCE_PAS2)*0.025)));
               raw = Math.round(raw * (1 - Math.min(0.5, bossEffectTotal('damageCut')*0.01)));
               raw = Math.max(1, raw);
               if (player.kyrieShield > 0) {
@@ -24589,7 +24660,7 @@ function update(dt, now) {
   if (player.hpRegen > 2000) {
     player.hpRegen=0;
     const regenMul = 1 + (getSkillLv('hprecov')+getSkillLv('detoxify')+getSkillLv('moveHpRecov'))*0.15 + getPathSkillLv('vitalityFlow')*0.15;
-    let spRegenMul = 1 + getPathSkillLv('concentration2')*0.15 + passiveLv(SPREGEN_PASSIVE_KEYS)*0.12;
+    let spRegenMul = 1 + getPathSkillLv('concentration2')*0.15 + passiveLv(SPREGEN_PASSIVE_KEYS)*0.12 + getSkillLv('abFaithHeal')*0.10;
     if (player.sp/player.maxSp < 0.2) spRegenMul += getPathSkillLv('pureEssence')*0.3; // Pure Essence
     // อัตราฟื้นฟูอิง VIT (HP) และ INT (SP) ตามสูตร RO
     player.hp=Math.min(player.maxHp,player.hp+hpRegenRate()*regenMul + bossEffectTotal('regen'));
@@ -24913,8 +24984,14 @@ function refreshBossTimers() {
 setInterval(() => {
   refreshQuickBtn();
   const modalOpen = document.getElementById('modalBg').style.display === 'flex';
-  const modalHTML = document.getElementById('modal').innerHTML;
-  if (modalOpen && modalHTML.includes('<h3>🛡️ ตัวละคร / อุปกรณ์')) openEquipStatus();
+  const box = document.getElementById('modal');
+  const modalHTML = box ? box.innerHTML : '';
+  if (modalOpen && modalHTML.includes('<h3>🛡️ ตัวละคร / อุปกรณ์')) {
+    // จำตำแหน่งเลื่อนไว้ก่อน แล้วคืนค่าหลังวาดใหม่ (กันหน้าเด้งกลับไปบนสุดทุก 0.3 วิ)
+    const st = box.scrollTop;
+    openEquipStatus();
+    box.scrollTop = st;
+  }
 }, 300);
 setInterval(refreshBossTimers, 1000);
 setInterval(() => { if (typeof refreshQuestBtn==='function') refreshQuestBtn(); }, 2000);
@@ -25153,7 +25230,7 @@ function resetPlayerToNew() {
 
 // ============ ระบบปาร์ตี้ (เพื่อนบอท) ============
 // เลือกอาชีพให้เพื่อนได้ เพื่อนจะเดินตาม สู้ให้ และใช้สกิลประจำอาชีพ
-const GAME_VERSION = 'v7.25';
+const GAME_VERSION = 'v7.26';
 const GAME_BUILD_DATE = '2026-07-20';
 const PARTY_MAX = 5;
 const PARTY_CLASSES = {
@@ -26967,6 +27044,20 @@ function generateDungeonLayout(tierKey) {
 const TOWER_MAX_FLOOR = 100;
 const TOWER_MAX_LIVES = 3;
 const TOWER_MAP = 'tower';
+
+// ---- เลือดบอสหอคอย: หนาขึ้นทุกชั้นไม่มีตัน ----
+// ชั้น 1-30 : ชั้น x 10 ล้าน (เหมือนเดิมเป๊ะ ไม่กระทบคนที่ไต่อยู่)
+// ชั้น 31+  : ทบต้นจาก 300 ล้าน ทีละ TOWER_HP_GROWTH ต่อชั้น
+// อยากให้โหด/ง่ายกว่านี้ แก้แค่ TOWER_HP_GROWTH ค่าเดียว
+//   1.015 -> ชั้น 100 = 851 ล้าน | 1.02 -> 1,200 ล้าน | 1.025 -> 1,690 ล้าน | 1.03 -> 2,375 ล้าน
+const TOWER_HP_PER_FLOOR = 10000000;
+const TOWER_HP_KNEE      = 30;          // ชั้นที่เริ่มเปลี่ยนเป็นทบต้น
+const TOWER_HP_GROWTH    = 1.02;        // +2% ต่อชั้นหลังชั้น 30
+function towerBossMaxHp(f) {
+  if (f <= TOWER_HP_KNEE) return f * TOWER_HP_PER_FLOOR;
+  const base = TOWER_HP_KNEE * TOWER_HP_PER_FLOOR;
+  return base * Math.pow(TOWER_HP_GROWTH, f - TOWER_HP_KNEE);
+}
 
 // สเกลความยากตามชั้น (จูนจากการจำลอง: ชั้น1 ~0.7วิ/ตัว -> ชั้น100 ~5.6วิ/ตัว)
 // อิงเลเวลผู้เล่นตอนเริ่มไต่ (เก็บไว้ใน towerState) เพื่อให้เข้าได้ทุกเลเวล
@@ -29081,7 +29172,7 @@ function buildTowerFloor(f) {
     // บอสตัวรองใน multi-boss ลด HP ลงนิดกันโหดเกิน
     const scale = count > 1 ? (i === 0 ? 1.0 : 0.72) : 1.0;
     const hpMul = def.hpMul * scale;
-    const maxHp = Math.round(Math.min(f * 10000000, 300000000) * scale);   // บอสหอคอย HP = ชั้น x 10 ล้าน (ตันที่ 300 ล้าน)
+    const maxHp = Math.round(towerBossMaxHp(f) * scale);   // เลือดบอสหอคอย (ดูสูตร/ค่าคอนฟิกที่ TOWER_HP_GROWTH)
     const [bx, by] = spots[i];
     monstersByMap[TOWER_MAP].push({
       id: mId++, type:def, x:bx, y:by, homeX:bx, homeY:by,
