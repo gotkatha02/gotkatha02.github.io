@@ -9885,7 +9885,10 @@ const AUTOSPELL_FX = { poison:'as_poison', stun:'as_stun', holy:'as_holy',
                        quake:'as_quake', drain:'as_drain', flame:'as_flame' };
 
 // เอฟเฟกต์ที่เล่นเป็นวงกว้าง ควรใหญ่กว่าปกติ
-const FX_AOE_KEYS = new Set(['sacrificeBlow','meteorAssault','acidSpray','hammerStorm',
+const FX_AOE_KEYS = new Set(['sxImpactCrater',
+  'rkDragonBreath','rkIgnitionBreak','rkWindCutter','rkDragonHowling','rgOverbrand','rgCannonSpear','rgMoonSlasher','abJudex','suRampageBlaster','suSkyNetBlow','scEarthGrave','gxPhantomMenace','gxRollingCutter','dkDragonBreath','dkStormSlash','cdArbitrium','amClimaxStorm','amRainOfCrystal','amViolentQuake','whCalamityGale','whHawkRush','abChainReaction','shFatalMenace','shFeintBomb','shMasquerade','shManholeTrap','raArrowStorm','raElectricShocker','raClusterBomb','miSevereRainstorm','miReverberation','miMetallicSound','miDominionImpulse','meArmCannon','meAxeTornado','meSelfDestruction','geCartCannon','geCrazyWeed','geSporeExplosion','geHellPlant','geThornTrap',
+
+  'sacrificeBlow','meteorAssault','acidSpray','hammerStorm',
   'magnum','nova','grandCross','magnusExorcismus','asuraStrike',
   'bowlingBash','cartTerminationX','cartcannon','cartRevolution','provoke','quake',
   'sulfurFume','demonstration','vulcanBlast','frostJoke','blitzBeat','sandman','raid',
@@ -9895,9 +9898,13 @@ const FX_AOE_KEYS = new Set(['sacrificeBlow','meteorAssault','acidSpray','hammer
   'pfEarthquake','pfHealthConv','snArrowVulcan','clFrostJokeX','clTarotCard',
   'wsHammerFall','crAcidSprayX','crSulfurFumeX','crAcidBomb','xMeteorRain','scFeintBomb']);
 
+// คีย์สกิลที่ไม่ต้องการให้แสดงเอฟเฟกต์ (ว่างไว้ = แสดงทุกสกิล)
+const MUTED_SKILL_FX = new Set([]);
 function playSkillFx(key, target) {
-  // เอาเอฟเฟกต์สกิลของ Guillotine Cross ออกทั้งหมด (ไม่แสดง visual/particle)
-  if (typeof key === 'string' && key.indexOf('gx') === 0) return;
+  // เดิมมีบรรทัดปิดเอฟเฟกต์สกิล gx ทั้งหมดอยู่ตรงนี้ (Guillotine Cross)
+  // ถอดออกแล้วเพราะทำให้ Cross Impact และสกิล gx อื่นไม่แสดงอะไรเลย
+  // ถ้าอยากปิดเฉพาะบางสกิล ใส่คีย์ลงใน MUTED_SKILL_FX ได้
+  if (MUTED_SKILL_FX.has(key)) return;
   // Meteor Storm — ลูกไฟตกใส่มอนทุกตัวในระยะ (แยกตัว)
   if (key === 'meteor') {
     // Meteor Storm แบบ RO: ลงรายตัวมอนในระยะ ตัวละ 3 ลูก (ตกคนละตำแหน่งรอบตัว คนละเวลา)
@@ -9923,6 +9930,20 @@ function playSkillFx(key, target) {
     const tx = (target && target.alive) ? target.x : player.x;
     const ty = (target && target.alive) ? target.y : player.y;
     spawnCrossImpactFx(tx, ty);
+    return;
+  }
+  // ---- ถ้าสกิลนี้มีเอฟเฟกต์แบบวาด (ชุดเดียวกับออโต้สเปล) ให้ใช้อันนั้นก่อน ----
+  // เดิมเอฟเฟกต์พวกนี้เล่นเฉพาะตอนไอเทมพร็อคออโต้สเปล เวลากดสกิลเองจะไม่มีอะไรขึ้น
+  if (typeof SPELL_FX_KIND !== 'undefined' && SPELL_FX_KIND[key]) {
+    if (FX_AOE_KEYS.has(key)) {
+      let n = 0;
+      monsters.forEach(mm => { if (mm.alive && dist(mm, player) < 232) { spawnSpellFx(key, mm.x, mm.y - 6, n * 45); n++; } });
+      if (!n) spawnSpellFx(key, player.x, player.y - 8);
+    } else if (target && target.alive) {
+      spawnSpellFx(key, target.x, target.y - 6);
+    } else {
+      spawnSpellFx(key, player.x, player.y - 8);
+    }
     return;
   }
   const kind = SKILL_FX[key]; if (!kind) return;
@@ -10009,18 +10030,54 @@ function castSkill(key, cls) {
   refreshQuickBtn();
 }
 // ใช้โดยระบบ ออโต้ตี: พยายามใช้สกิลเงียบๆ ถ้าพร้อม (ไม่ log แจ้งเตือนตอนยังไม่พร้อมเหมือนกดเอง)
-function tryAutoCastSkill(key, conditionFn) {
+// ---- รายการสกิลออโต้: อาชีพปัจจุบันมาก่อน แล้วต่อด้วยอาชีพเก่าในสายเดียวกัน ----
+// ช่องของอาชีพเก่าใช้เฉพาะที่ผู้เล่นกดตั้งเองจากแท็บอาชีพนั้น (ไม่สร้างค่าเริ่มต้นให้อัตโนมัติ)
+// ตั้งได้จาก Skill Tree -> แท็บอาชีพเก่า -> ปุ่ม ⚙ ออโต้ ของสกิลที่ต้องการ
+function autoSkillPlan() {
+  const out = [], seen = new Set();
+  // จำกัดไว้แค่อาชีพขั้นสูง (High Class ขึ้นไป) เพื่อไม่ให้สกิลขั้น 1-2 ที่อ่อนแล้วแย่งคิวยิง
+  const valid = computeValidClassChain() || [];
+  const chain = [player.highClassPrev, player.highClass, player.thirdClass, player.fourthClass, player.className]
+    .filter((c, i, a) => c && a.indexOf(c) === i && skillDefs[c] && (!valid.length || valid.includes(c)));
+  const findOwner = (k, preferred) => {
+    if (preferred && currentSkillsFor(preferred).some(s=>s.key===k && s.type==='active') && getSkillLv(k, preferred) > 0) return preferred;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const c = chain[i];
+      if (currentSkillsFor(c).some(s=>s.key===k && s.type==='active') && getSkillLv(k, c) > 0) return c;
+    }
+    return null;
+  };
+  const push = (cls, keys) => {
+    if (!keys) return;
+    keys.forEach(k => {
+      if (seen.has(k)) return;
+      const owner = findOwner(k, cls);
+      if (!owner) return;
+      seen.add(k);
+      out.push({ key: k, cls: owner });
+    });
+  };
+  push(player.className, getAutoSkillSlots());
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const c = chain[i];
+    if (c === player.className) continue;
+    push(c, player.autoSkillSlots && player.autoSkillSlots[c]);
+  }
+  return out;
+}
+function tryAutoCastSkill(key, conditionFn, cls) {
   if (!key) return false;
-  const def = currentSkills().find(s=>s.key===key);
+  cls = cls || player.className;      // รองรับสกิลของอาชีพเก่าในสาย (เช่น Guillotine Cross ตอนเป็น Shadow Cross)
+  const def = currentSkillsFor(cls).find(s=>s.key===key);
   if (!def || def.type!=='active') return false;
-  const lv = getSkillLv(key);
+  const lv = getSkillLv(key, cls);
   if (lv<=0) return false;
   if ((player.skillCooldowns[key]||0) > 0) return false;
   const spCost = effectiveSpCost(def.sp(lv));
   if (player.sp < spCost) return false;
   if (conditionFn && !conditionFn()) return false;
   if (castState) return false;   // กำลังร่ายเวทอยู่ รอให้เสร็จก่อน
-  if (isMagicSkill(def)) { return startCast(def, key, player.className, lv, spCost, true); }
+  if (isMagicSkill(def)) { return startCast(def, key, cls, lv, spCost, true); }
   castingSkill = true;
   const ok = def.cast(lv);
   castingSkill = false;
@@ -10158,7 +10215,8 @@ function openSkillTree(cls) {
   html += `<div style="font-size:12px;color:#b8a880;margin-top:6px">แต้มสกิลที่มี (ใช้ร่วมกันทั้งสองคลาส): <b style="color:#f0d98c">${player.skillPoints}</b></div>`;
   const autoSlots = getAutoSkillSlots(viewCls);
   html += `<div style="font-size:12px;color:#9bd0e0;margin-top:4px">🤖 สกิลออโต้: <b style="color:#f0d98c">เลือกไว้ ${autoSlots.length} ตัว</b>
-    <span style="color:#8a9aa0">(ใส่ได้สูงสุด 5 — ตัวเดียวก็ใช้ได้ ไม่ต้องครบ)</span></div>`;
+    <span style="color:#8a9aa0">(ใส่ได้สูงสุด 5 ต่ออาชีพ — ตัวเดียวก็ใช้ได้ ไม่ต้องครบ)</span>
+    <div style="font-size:11px;color:#8a9aa0;margin-top:2px">ตั้งค้างไว้ในแท็บอาชีพเก่าได้ ออโต้จะใช้สกิลอาชีพปัจจุบันก่อน แล้วไล่ลงไปหาอาชีพเก่าที่ยังพร้อมใช้</div></div>`;
   const invested = totalInvested(viewCls);
   if (skillResetPending === viewCls) {
     html += `<div style="background:#2a1f14;border:1px solid #e0a04a;border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12px;color:#f0d98c">
@@ -14771,6 +14829,96 @@ const FX_CODE = {
   sc_psychic:{c:['#a060e0','#d8a0ff','#6820a8'],shape:'sc_psychic'},
   sc_diamond:{c:['#80d8f8','#ffffff','#4098d0'],shape:'sc_diamond'},
   ab_abyss:{c:['#a060ff','#e0b0ff','#5820a0'],shape:'ab_abyss'},
+  // ---- Shadow Cross (ขั้น 4) โทนม่วงเงา ----
+  sx_savage: {c:['#b060f0','#f0e0ff','#3a0a68'],shape:'sx_savage'},
+  sx_stab:   {c:['#8f4ad8','#e8d0ff','#2a0650'],shape:'sx_stab'},
+  sx_crater: {c:['#8a44d0','#d8a8ff','#240540'],shape:'sx_crater'},
+  sx_claw:   {c:['#a838e0','#ffb0ff','#2e0752'],shape:'sx_claw'},
+  gx_cross:  {c:['#c060ff','#fff0ff','#2a0450'],shape:'gx_crossimpact'},
+  // ---- อาชีพขั้น 3 / ขั้น 4 ที่เหลือ: ใช้รูปแบบวาดเดิม เปลี่ยนชุดสีตามธีมคลาส ----
+  fxk_rkDragonBreath:{c:['#ff7a30','#ffc070','#a03000'],shape:'as_flame'},
+  fxk_rkIgnitionBreak:{c:['#ff7a30','#ffc070','#a03000'],shape:'burst'},
+  fxk_rkSonicWave:{c:['#ff7a30','#ffc070','#a03000'],shape:'bolt'},
+  fxk_rkWindCutter:{c:['#ff7a30','#ffc070','#a03000'],shape:'spin'},
+  fxk_rkStormBlast:{c:['#ff7a30','#ffc070','#a03000'],shape:'burst'},
+  fxk_rkDragonHowling:{c:['#ff7a30','#ffc070','#a03000'],shape:'ring'},
+  fxk_rgOverbrand:{c:['#f0d060','#fff4c0','#9a7418'],shape:'slash'},
+  fxk_rgCannonSpear:{c:['#f0d060','#fff4c0','#9a7418'],shape:'bolt'},
+  fxk_rgShieldPress:{c:['#f0d060','#fff4c0','#9a7418'],shape:'burst'},
+  fxk_rgVanishingPoint:{c:['#f0d060','#fff4c0','#9a7418'],shape:'bolt'},
+  fxk_rgInspiration:{c:['#f0d060','#fff4c0','#9a7418'],shape:'glow'},
+  fxk_rgMoonSlasher:{c:['#f0d060','#fff4c0','#9a7418'],shape:'slash'},
+  fxk_abAdoramus:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'pillar'},
+  fxk_abJudex:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'as_holy'},
+  fxk_abHighnessHeal:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'glow'},
+  fxk_abSacrament:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'ring'},
+  fxk_abClementia:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'glow'},
+  fxk_abCantoCandidus:{c:['#ffe9a8','#ffffff','#ffd060'],shape:'ring'},
+  fxk_suTigerCannon:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'pillar'},
+  fxk_suGateOfHell:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'as_drain'},
+  fxk_suRampageBlaster:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'burst'},
+  fxk_suKnuckleArrow:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'bolt'},
+  fxk_suSkyNetBlow:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'spin'},
+  fxk_suFallenEmpire:{c:['#ff9a30','#ffe0a0','#c04000'],shape:'burst'},
+  fxk_scEarthGrave:{c:['#c8a868','#e8d8b0','#8a6a38'],shape:'as_quake'},
+  fxk_scVaretyrSpear:{c:['#c8a868','#e8d8b0','#8a6a38'],shape:'bolt'},
+  fxk_scStriking:{c:['#c8a868','#e8d8b0','#8a6a38'],shape:'glow'},
+  fxk_scEnergyCoat:{c:['#c8a868','#e8d8b0','#8a6a38'],shape:'ring'},
+  fxk_gxCrossImpact:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'slash'},
+  fxk_gxDarkClaw:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'shards'},
+  fxk_gxCounterSlash:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'slash'},
+  fxk_gxPhantomMenace:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'as_drain'},
+  fxk_gxRollingCutter:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'spin'},
+  fxk_gxVenomPressure:{c:['#8ad04a','#d0f090','#3a6a10'],shape:'as_poison'},
+  fxk_dkDragonBreath:{c:['#ff5a20','#ffb060','#8a1800'],shape:'as_flame'},
+  fxk_dkHackAndSlasher:{c:['#ff5a20','#ffb060','#8a1800'],shape:'slash'},
+  fxk_dkStormSlash:{c:['#ff5a20','#ffb060','#8a1800'],shape:'spin'},
+  fxk_dkMadnessCrusher:{c:['#ff5a20','#ffb060','#8a1800'],shape:'burst'},
+  fxk_cdArbitrium:{c:['#fff0c8','#ffffff','#e0b040'],shape:'as_holy'},
+  fxk_cdFrancisca:{c:['#fff0c8','#ffffff','#e0b040'],shape:'slash'},
+  fxk_cdPrayer:{c:['#fff0c8','#ffffff','#e0b040'],shape:'glow'},
+  fxk_cdPneuma:{c:['#fff0c8','#ffffff','#e0b040'],shape:'ring'},
+  fxk_amClimaxStorm:{c:['#80d0ff','#e8f8ff','#3858c0'],shape:'spin'},
+  fxk_amFrozenSlash:{c:['#80d0ff','#e8f8ff','#3858c0'],shape:'sc_diamond'},
+  fxk_amRainOfCrystal:{c:['#80d0ff','#e8f8ff','#3858c0'],shape:'sc_diamond'},
+  fxk_amViolentQuake:{c:['#80d0ff','#e8f8ff','#3858c0'],shape:'as_quake'},
+  fxk_whCalamityGale:{c:['#a0f0c0','#e8fff0','#2f9060'],shape:'spin'},
+  fxk_whGaleStorm:{c:['#a0f0c0','#e8fff0','#2f9060'],shape:'bolt'},
+  fxk_whCrescive:{c:['#a0f0c0','#e8fff0','#2f9060'],shape:'bolt'},
+  fxk_whHawkRush:{c:['#a0f0c0','#e8fff0','#2f9060'],shape:'burst'},
+  fxk_abFrenzyShot:{c:['#a060ff','#e0b0ff','#5820a0'],shape:'bolt'},
+  fxk_abDeftStab:{c:['#a060ff','#e0b0ff','#5820a0'],shape:'slash'},
+  fxk_abChainReaction:{c:['#a060ff','#e0b0ff','#5820a0'],shape:'burst'},
+  fxk_shFatalMenace:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'slash'},
+  fxk_shTriangleShot:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'bolt'},
+  fxk_shFeintBomb:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'burst'},
+  fxk_shShadowSpell:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'as_drain'},
+  fxk_shMasquerade:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'ring'},
+  fxk_shManholeTrap:{c:['#a070e0','#d0a8ff','#5a2890'],shape:'as_quake'},
+  fxk_raArrowStorm:{c:['#90d060','#d8f0b0','#4f8020'],shape:'bolt'},
+  fxk_raAimedBolt:{c:['#90d060','#d8f0b0','#4f8020'],shape:'bolt'},
+  fxk_raElectricShocker:{c:['#90d060','#d8f0b0','#4f8020'],shape:'as_stun'},
+  fxk_raClusterBomb:{c:['#90d060','#d8f0b0','#4f8020'],shape:'burst'},
+  fxk_raSharpShooting:{c:['#90d060','#d8f0b0','#4f8020'],shape:'bolt'},
+  fxk_raWargStrike:{c:['#90d060','#d8f0b0','#4f8020'],shape:'slash'},
+  fxk_miSevereRainstorm:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'bolt'},
+  fxk_miReverberation:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'ring'},
+  fxk_miMetallicSound:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'burst'},
+  fxk_miDominionImpulse:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'ring'},
+  fxk_miWarcryBeyond:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'glow'},
+  fxk_miSongOfMana:{c:['#ff90d0','#ffd8f0','#c04090'],shape:'glow'},
+  fxk_meArmCannon:{c:['#ffb040','#ffe0a0','#a06010'],shape:'burst'},
+  fxk_meVulcanArm:{c:['#ffb040','#ffe0a0','#a06010'],shape:'bolt'},
+  fxk_meKnuckleBoost:{c:['#ffb040','#ffe0a0','#a06010'],shape:'burst'},
+  fxk_meAxeTornado:{c:['#ffb040','#ffe0a0','#a06010'],shape:'spin'},
+  fxk_meAxeBoomerang:{c:['#ffb040','#ffe0a0','#a06010'],shape:'slash'},
+  fxk_meSelfDestruction:{c:['#ffb040','#ffe0a0','#a06010'],shape:'burst'},
+  fxk_geCartCannon:{c:['#a0e050','#e0ffa0','#508010'],shape:'burst'},
+  fxk_geCrazyWeed:{c:['#a0e050','#e0ffa0','#508010'],shape:'shards'},
+  fxk_geSporeExplosion:{c:['#a0e050','#e0ffa0','#508010'],shape:'as_poison'},
+  fxk_geHellPlant:{c:['#a0e050','#e0ffa0','#508010'],shape:'shards'},
+  fxk_geAcidBomb:{c:['#a0e050','#e0ffa0','#508010'],shape:'as_poison'},
+  fxk_geThornTrap:{c:['#a0e050','#e0ffa0','#508010'],shape:'shards'},
 };
 function drawFxCode(ctx, fx, t, ax, ay) {
   const def = FX_CODE[fx.kind] || {c:['#ffffff','#cccccc'],shape:'burst'};
@@ -15325,6 +15473,231 @@ function drawFxCode(ctx, fx, t, ax, ay) {
       ctx.beginPath(); ctx.arc(px, py, sz, 0, 7); ctx.fill();
     }
   }
+  // ===================== Shadow Cross (วาดใหม่เฉพาะธีมเงา) =====================
+  // เงาต้องใช้การผสมสีปกติ ถ้าใช้ 'lighter' สีมืดจะจางหายไปหมด
+  else if (sh === 'sx_savage') {
+    // พุ่งแทง 4 นัด: ใบมีดไล่มาเป็นชุด + ภาพติดตาสีเงิน + ควันดำใต้เท้า
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = fade * 0.55;
+    var sg = ctx.createRadialGradient(0, R*0.2, 0, 0, R*0.2, R*1.05);
+    sg.addColorStop(0, 'rgba(12,0,26,0.85)');
+    sg.addColorStop(1, 'rgba(12,0,26,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath(); ctx.ellipse(0, R*0.2, R*1.05, R*0.5, 0, 0, 6.284); ctx.fill();
+    for (var bi = 0; bi < 4; bi++) {
+      var bp = (t - bi*0.13) / 0.42;                 // ไล่นัดละ 0.13
+      if (bp <= 0 || bp >= 1) continue;
+      var be = 1 - Math.pow(1 - bp, 3);
+      var ba = -0.9 + bi*0.62;
+      ctx.save();
+      ctx.rotate(ba);
+      // ใบมีดเรียวปลายแหลม
+      var bl = R*(0.5 + be*1.25), bw = R*0.16*(1 - bp*0.65);
+      ctx.globalAlpha = fade * (1 - bp*0.8);
+      ctx.fillStyle = cols[1] || cols[0];
+      ctx.beginPath();
+      ctx.moveTo(-bl*0.35, 0);
+      ctx.lineTo(bl*0.55, -bw);
+      ctx.lineTo(bl, 0);
+      ctx.lineTo(bl*0.55, bw);
+      ctx.closePath(); ctx.fill();
+      // ขอบเงาม่วงหลังใบมีด
+      ctx.globalAlpha = fade * (0.7 - bp*0.6);
+      ctx.strokeStyle = cols[2] || cols[0];
+      ctx.lineWidth = 2.4 * fx.scale;
+      ctx.beginPath(); ctx.moveTo(-bl*0.5, 0); ctx.lineTo(bl*0.9, 0); ctx.stroke();
+      ctx.restore();
+    }
+    // ประกายจุดกระเด็นตามแนวพุ่ง
+    ctx.globalAlpha = fade * 0.85; ctx.fillStyle = cols[0];
+    for (var si = 0; si < 7; si++) {
+      var sa = -0.9 + si*0.3, sr = R*(0.4 + ease*0.9) + si*1.5*fx.scale;
+      ctx.beginPath(); ctx.arc(Math.cos(sa)*sr, Math.sin(sa)*sr*0.6, Math.max(0.6, (2.2-t*1.6)*fx.scale), 0, 6.284); ctx.fill();
+    }
+  }
+  else if (sh === 'sx_stab') {
+    // แทงทะลุเงา: หลาวเงาแทงขึ้นจากพื้นแล้วหุบ + ไอเงาไหลขึ้น
+    ctx.globalCompositeOperation = 'source-over';
+    var stp = t < 0.35 ? t/0.35 : 1;                  // ช่วงแทงออก
+    var stb = t > 0.55 ? (t-0.55)/0.45 : 0;           // ช่วงหุบกลับ
+    var sl = R*1.55*(1 - Math.pow(1-stp, 3)) * (1 - stb*0.45);
+    // เงาใต้ตัวเป้า
+    ctx.globalAlpha = fade * 0.6;
+    ctx.fillStyle = 'rgba(10,0,22,0.8)';
+    ctx.beginPath(); ctx.ellipse(0, R*0.24, R*0.72, R*0.3, 0, 0, 6.284); ctx.fill();
+    // ตัวหลาว (สามเหลี่ยมเรียวจากล่างขึ้นบน)
+    ctx.globalAlpha = fade * (1 - stb*0.7);
+    var spg = ctx.createLinearGradient(0, R*0.24, 0, R*0.24 - sl);
+    spg.addColorStop(0, cols[2] || cols[0]);
+    spg.addColorStop(0.6, cols[0]);
+    spg.addColorStop(1, cols[1] || cols[0]);
+    ctx.fillStyle = spg;
+    var sw = R*0.2*(1 - stb*0.5);
+    ctx.beginPath();
+    ctx.moveTo(-sw, R*0.24);
+    ctx.lineTo(0, R*0.24 - sl);
+    ctx.lineTo(sw, R*0.24);
+    ctx.closePath(); ctx.fill();
+    // แกนสว่างกลางหลาว
+    ctx.globalAlpha = fade * (0.85 - stb*0.8);
+    ctx.strokeStyle = cols[1] || cols[0];
+    ctx.lineWidth = 1.6 * fx.scale;
+    ctx.beginPath(); ctx.moveTo(0, R*0.24); ctx.lineTo(0, R*0.24 - sl*0.92); ctx.stroke();
+    // ไอเงาลอยขึ้นสองข้าง
+    ctx.globalAlpha = fade * 0.7; ctx.fillStyle = cols[0];
+    for (var mi2 = 0; mi2 < 6; mi2++) {
+      var mp = (ease + mi2*0.17) % 1;
+      var mx = (mi2 % 2 ? 1 : -1) * R*0.22*(0.4 + mp);
+      var my = R*0.24 - sl*mp;
+      ctx.beginPath(); ctx.arc(mx, my, Math.max(0.5, (2.4 - mp*2)*fx.scale), 0, 6.284); ctx.fill();
+    }
+  }
+  else if (sh === 'sx_crater') {
+    // ทุบพื้นเป็นหลุม: หลุมดำ + รอยแตกแผ่ออก + หนามเงาผุด + คลื่นกระแทก
+    ctx.globalCompositeOperation = 'source-over';
+    var cr = R * (0.3 + ease * 1.0);
+    // ปากหลุม
+    ctx.globalAlpha = fade * 0.85;
+    var cg = ctx.createRadialGradient(0, R*0.18, 0, 0, R*0.18, cr);
+    cg.addColorStop(0, 'rgba(6,0,14,0.95)');
+    cg.addColorStop(0.6, cols[2] || cols[0]);
+    cg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.ellipse(0, R*0.18, cr, cr*0.5, 0, 0, 6.284); ctx.fill();
+    // รอยแตก 7 เส้น หักมุมออกจากศูนย์
+    ctx.globalAlpha = fade * 0.9;
+    ctx.strokeStyle = cols[1] || cols[0];
+    ctx.lineWidth = 2.2 * fx.scale * (1 - t*0.5);
+    for (var ci = 0; ci < 7; ci++) {
+      var ca = (ci / 7) * 6.284 + 0.3;
+      var seg = cr * 1.35 * ease;
+      ctx.beginPath();
+      ctx.moveTo(0, R*0.18);
+      var px2 = Math.cos(ca)*seg*0.45, py2 = R*0.18 + Math.sin(ca)*seg*0.45*0.5;
+      ctx.lineTo(px2, py2);
+      var ca2 = ca + (ci % 2 ? 0.35 : -0.35);
+      ctx.lineTo(px2 + Math.cos(ca2)*seg*0.6, py2 + Math.sin(ca2)*seg*0.6*0.5);
+      ctx.stroke();
+    }
+    // หนามเงาผุดขึ้นรอบหลุม
+    ctx.globalAlpha = fade * 0.8;
+    ctx.fillStyle = cols[0];
+    for (var ti = 0; ti < 6; ti++) {
+      var ta = (ti / 6) * 6.284 + t*0.6;
+      var tr = cr * 0.85;
+      var tx = Math.cos(ta)*tr, ty = R*0.18 + Math.sin(ta)*tr*0.5;
+      var th = R*0.55*ease*(0.6 + 0.4*Math.sin(ti*1.7));
+      ctx.beginPath();
+      ctx.moveTo(tx - R*0.09, ty);
+      ctx.lineTo(tx, ty - th);
+      ctx.lineTo(tx + R*0.09, ty);
+      ctx.closePath(); ctx.fill();
+    }
+    // คลื่นกระแทกวงนอก
+    ctx.globalAlpha = fade * 0.55 * (1 - t);
+    ctx.strokeStyle = cols[1] || cols[0];
+    ctx.lineWidth = 3 * fx.scale * (1 - t);
+    ctx.beginPath(); ctx.ellipse(0, R*0.18, cr*1.5, cr*0.75, 0, 0, 6.284); ctx.stroke();
+  }
+  else if (sh === 'gx_crossimpact') {
+    // Cross Impact: ฟันสองนัดไล่กันเป็นกากบาท + แกนกระแทกกลาง + สะเก็ดพุ่งตามแนวทแยง
+    ctx.globalCompositeOperation = 'source-over';
+    // เงาอัดตรงจุดกระแทก
+    ctx.globalAlpha = fade * 0.7;
+    var xg = ctx.createRadialGradient(0, 0, 0, 0, 0, R * (0.3 + ease * 0.6));
+    xg.addColorStop(0, 'rgba(8,0,18,0.95)');
+    xg.addColorStop(0.55, cols[2] || cols[0]);
+    xg.addColorStop(1, 'rgba(8,0,18,0)');
+    ctx.fillStyle = xg;
+    ctx.beginPath(); ctx.arc(0, 0, R * (0.3 + ease * 0.6), 0, 6.284); ctx.fill();
+    // ใบมีดสองนัด: นัดแรกทแยงลง นัดสองทแยงขึ้น (หน่วง 0.16)
+    var xblades = [[-0.72, 0.0], [0.72, 0.16]];
+    for (var xi = 0; xi < 2; xi++) {
+      var xp = (t - xblades[xi][1]) / 0.34;
+      if (xp <= 0) continue;
+      var xe = Math.min(1, 1 - Math.pow(1 - Math.min(1, xp), 3));
+      var xhold = xp > 1 ? Math.max(0, 1 - (xp - 1) * 0.85) : 1;
+      var xl = R * 1.75 * xe;
+      ctx.save();
+      ctx.rotate(xblades[xi][0]);
+      // ลำมีดปลายเรียวสองข้าง
+      ctx.globalAlpha = fade * 0.9 * xhold;
+      var xbg = ctx.createLinearGradient(-xl, 0, xl, 0);
+      xbg.addColorStop(0, 'rgba(0,0,0,0)');
+      xbg.addColorStop(0.5, cols[1] || cols[0]);
+      xbg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = xbg;
+      var xbw = R * 0.2 * (1 - t * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(-xl, 0);
+      ctx.quadraticCurveTo(0, -xbw, xl, 0);
+      ctx.quadraticCurveTo(0, xbw, -xl, 0);
+      ctx.closePath(); ctx.fill();
+      // แกนคมกลางลำมีด
+      ctx.globalAlpha = fade * 0.8 * xhold;
+      ctx.strokeStyle = cols[0];
+      ctx.lineWidth = 2.2 * fx.scale * (1 - t * 0.4);
+      ctx.beginPath(); ctx.moveTo(-xl * 0.95, 0); ctx.lineTo(xl * 0.95, 0); ctx.stroke();
+      ctx.restore();
+    }
+    // คลื่นกระแทกบานออกแล้วจาง
+    ctx.globalAlpha = fade * 0.5 * (1 - t);
+    ctx.strokeStyle = cols[1] || cols[0];
+    ctx.lineWidth = 3.2 * fx.scale * (1 - t);
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.5 * ease, R * 1.5 * ease * 0.82, 0, 0, 6.284); ctx.stroke();
+    // สะเก็ดพุ่งออกสี่ทิศตามแนวกากบาท
+    ctx.globalAlpha = fade * 0.9; ctx.fillStyle = cols[1] || cols[0];
+    for (var xfi = 0; xfi < 8; xfi++) {
+      var xfa = -0.72 + (xfi % 4) * 1.5708 + (xfi > 3 ? 1.44 : 0);
+      var xfp = (ease + xfi * 0.09) % 1;
+      var xfr = R * (0.5 + xfp * 1.35);
+      ctx.beginPath();
+      ctx.arc(Math.cos(xfa) * xfr, Math.sin(xfa) * xfr, Math.max(0.6, (2.6 - xfp * 2.1) * fx.scale), 0, 6.284);
+      ctx.fill();
+    }
+  }
+  else if (sh === 'sx_claw') {
+    // รอยเล็บเงา: 3 รอยขนานกวาดเฉียง มีแกนสว่าง + หมอกดำค้างไว้
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = fade * 0.5;
+    var kg = ctx.createRadialGradient(0, 0, 0, 0, 0, R*1.1);
+    kg.addColorStop(0, 'rgba(18,0,32,0.8)');
+    kg.addColorStop(1, 'rgba(18,0,32,0)');
+    ctx.fillStyle = kg;
+    ctx.beginPath(); ctx.arc(0, 0, R*1.1, 0, 6.284); ctx.fill();
+    ctx.save();
+    ctx.rotate(-0.5);
+    for (var ki = 0; ki < 3; ki++) {
+      var kp = (t - ki*0.07) / 0.5;
+      if (kp <= 0) continue;
+      var ke = Math.min(1, 1 - Math.pow(1 - Math.min(1, kp), 3));
+      var off = (ki - 1) * R * 0.34;
+      var kl = R * 1.5 * ke;
+      ctx.globalAlpha = fade * (0.95 - ki*0.12) * (kp > 1 ? Math.max(0, 1-(kp-1)) : 1);
+      // รอยหนาสีมืด
+      ctx.strokeStyle = cols[2] || cols[0];
+      ctx.lineWidth = 6.5 * fx.scale * (1 - t*0.45);
+      ctx.beginPath();
+      ctx.moveTo(-kl*0.5, off - R*0.3);
+      ctx.quadraticCurveTo(0, off, kl*0.5, off + R*0.3);
+      ctx.stroke();
+      // แกนสว่างกลางรอย
+      ctx.strokeStyle = cols[1] || cols[0];
+      ctx.lineWidth = 2 * fx.scale * (1 - t*0.4);
+      ctx.beginPath();
+      ctx.moveTo(-kl*0.46, off - R*0.28);
+      ctx.quadraticCurveTo(0, off, kl*0.46, off + R*0.28);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // เศษเงาสะบัดตามรอย
+    ctx.globalAlpha = fade * 0.75; ctx.fillStyle = cols[0];
+    for (var di = 0; di < 8; di++) {
+      var dp = (ease + di*0.13) % 1;
+      var dx = -R*0.8 + R*1.7*dp, dy = -R*0.5 + R*1.0*dp + Math.sin(di*2.1)*R*0.18;
+      ctx.beginPath(); ctx.arc(dx, dy, Math.max(0.5, (2.3 - dp*1.9)*fx.scale), 0, 6.284); ctx.fill();
+    }
+  }
   ctx.restore();
 }
 // ค่าตั้งต้นของแต่ละเอฟเฟกต์: ความสูงที่ตกลงมา, สเกล, ระยะเวลา, จุดยึด
@@ -15348,6 +15721,92 @@ const SPELL_FX_KIND = {
   shAutoShadowSpell:'shshadow',
   scPsychicWave:'scpsychic', scDiamondDust:'scdiamond',
   abAbyssSquare:'ababyss',
+  // ---- Shadow Cross ----
+  sxSavageImpact:'sxsavage', sxShadowStab:'sxstab',
+  sxImpactCrater:'sxcrater', sxDarkClaw:'sxclaw',
+  rkDragonBreath:'st_rkDragonBreath',
+  rkIgnitionBreak:'st_rkIgnitionBreak',
+  rkSonicWave:'st_rkSonicWave',
+  rkWindCutter:'st_rkWindCutter',
+  rkStormBlast:'st_rkStormBlast',
+  rkDragonHowling:'st_rkDragonHowling',
+  rgOverbrand:'st_rgOverbrand',
+  rgCannonSpear:'st_rgCannonSpear',
+  rgShieldPress:'st_rgShieldPress',
+  rgVanishingPoint:'st_rgVanishingPoint',
+  rgInspiration:'st_rgInspiration',
+  rgMoonSlasher:'st_rgMoonSlasher',
+  abAdoramus:'st_abAdoramus',
+  abJudex:'st_abJudex',
+  abHighnessHeal:'st_abHighnessHeal',
+  abSacrament:'st_abSacrament',
+  abClementia:'st_abClementia',
+  abCantoCandidus:'st_abCantoCandidus',
+  suTigerCannon:'st_suTigerCannon',
+  suGateOfHell:'st_suGateOfHell',
+  suRampageBlaster:'st_suRampageBlaster',
+  suKnuckleArrow:'st_suKnuckleArrow',
+  suSkyNetBlow:'st_suSkyNetBlow',
+  suFallenEmpire:'st_suFallenEmpire',
+  scEarthGrave:'st_scEarthGrave',
+  scVaretyrSpear:'st_scVaretyrSpear',
+  scStriking:'st_scStriking',
+  scEnergyCoat:'st_scEnergyCoat',
+  gxCrossImpact:'st_gxCrossImpact',
+  gxDarkClaw:'st_gxDarkClaw',
+  gxCounterSlash:'st_gxCounterSlash',
+  gxPhantomMenace:'st_gxPhantomMenace',
+  gxRollingCutter:'st_gxRollingCutter',
+  gxVenomPressure:'st_gxVenomPressure',
+  dkDragonBreath:'st_dkDragonBreath',
+  dkHackAndSlasher:'st_dkHackAndSlasher',
+  dkStormSlash:'st_dkStormSlash',
+  dkMadnessCrusher:'st_dkMadnessCrusher',
+  cdArbitrium:'st_cdArbitrium',
+  cdFrancisca:'st_cdFrancisca',
+  cdPrayer:'st_cdPrayer',
+  cdPneuma:'st_cdPneuma',
+  amClimaxStorm:'st_amClimaxStorm',
+  amFrozenSlash:'st_amFrozenSlash',
+  amRainOfCrystal:'st_amRainOfCrystal',
+  amViolentQuake:'st_amViolentQuake',
+  whCalamityGale:'st_whCalamityGale',
+  whGaleStorm:'st_whGaleStorm',
+  whCrescive:'st_whCrescive',
+  whHawkRush:'st_whHawkRush',
+  abFrenzyShot:'st_abFrenzyShot',
+  abDeftStab:'st_abDeftStab',
+  abChainReaction:'st_abChainReaction',
+  shFatalMenace:'st_shFatalMenace',
+  shTriangleShot:'st_shTriangleShot',
+  shFeintBomb:'st_shFeintBomb',
+  shShadowSpell:'st_shShadowSpell',
+  shMasquerade:'st_shMasquerade',
+  shManholeTrap:'st_shManholeTrap',
+  raArrowStorm:'st_raArrowStorm',
+  raAimedBolt:'st_raAimedBolt',
+  raElectricShocker:'st_raElectricShocker',
+  raClusterBomb:'st_raClusterBomb',
+  raSharpShooting:'st_raSharpShooting',
+  raWargStrike:'st_raWargStrike',
+  miSevereRainstorm:'st_miSevereRainstorm',
+  miReverberation:'st_miReverberation',
+  miMetallicSound:'st_miMetallicSound',
+  miDominionImpulse:'st_miDominionImpulse',
+  miWarcryBeyond:'st_miWarcryBeyond',
+  miSongOfMana:'st_miSongOfMana',
+  meArmCannon:'st_meArmCannon',
+  meVulcanArm:'st_meVulcanArm',
+  meKnuckleBoost:'st_meKnuckleBoost',
+  meAxeTornado:'st_meAxeTornado',
+  meAxeBoomerang:'st_meAxeBoomerang',
+  meSelfDestruction:'st_meSelfDestruction',
+  geCartCannon:'st_geCartCannon',
+  geCrazyWeed:'st_geCrazyWeed',
+  geSporeExplosion:'st_geSporeExplosion',
+  geHellPlant:'st_geHellPlant',
+  geAcidBomb:'st_geAcidBomb',
+  geThornTrap:'st_geThornTrap',
 };
 const FX_STYLE = {
   comet:        { dur:1300, scale:1.6, fallFrom:70,  anchor:'head',   fxKind:'fx_firemeteor' },
@@ -15355,7 +15814,7 @@ const FX_STYLE = {
   jupitel:      { dur:600,  scale:1.6, fallFrom:0,   anchor:'center', fxKind:'fx_lightning' },
   meteorassault:{ dur:640,  scale:2.4, fallFrom:0,   anchor:'center', fxKind:'fx_bigboom' },
   meteorfall:   { dur:900,  scale:2.0, fallFrom:150, anchor:'head', impactKind:'meteorboom', fxKind:'fx_firemeteor' },
-  crossimpact:  { dur:520,  scale:1.9, fallFrom:0,   anchor:'center', fxKind:'fx_goldburst' },
+  crossimpact:  { dur:700,  scale:2.2, fallFrom:0,   anchor:'center', fxKind:'gx_cross' },
   meteorboom:   { dur:420,  scale:1.9, fallFrom:0,   anchor:'center', fxKind:'fx_bigboom' },
   lov:          { dur:850,  scale:1.8, fallFrom:0,   anchor:'center', fxKind:'fx_holy' },
   // ---- เจมออโต้สเปล ----
@@ -15369,6 +15828,93 @@ const FX_STYLE = {
   scpsychic:{ dur:780, scale:2.1, fallFrom:0, anchor:'center', fxKind:'sc_psychic' },
   scdiamond:{ dur:820, scale:2.0, fallFrom:0, anchor:'center', fxKind:'sc_diamond' },
   ababyss:{ dur:900, scale:2.4, fallFrom:0, anchor:'center', fxKind:'ab_abyss' },
+  sxsavage:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'sx_savage' },
+  sxstab:{   dur:580, scale:1.8, fallFrom:0, anchor:'center', fxKind:'sx_stab' },
+  sxcrater:{ dur:780, scale:2.5, fallFrom:0, anchor:'center', fxKind:'sx_crater' },
+  sxclaw:{   dur:840, scale:2.0, fallFrom:0, anchor:'center', fxKind:'sx_claw' },
+  st_rkDragonBreath:{ dur:700, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_rkDragonBreath' },
+  st_rkIgnitionBreak:{ dur:660, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_rkIgnitionBreak' },
+  st_rkSonicWave:{ dur:520, scale:1.8, fallFrom:0, anchor:'center', fxKind:'fxk_rkSonicWave' },
+  st_rkWindCutter:{ dur:620, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_rkWindCutter' },
+  st_rkStormBlast:{ dur:560, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_rkStormBlast' },
+  st_rkDragonHowling:{ dur:780, scale:2.6, fallFrom:0, anchor:'center', fxKind:'fxk_rkDragonHowling' },
+  st_rgOverbrand:{ dur:600, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_rgOverbrand' },
+  st_rgCannonSpear:{ dur:560, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_rgCannonSpear' },
+  st_rgShieldPress:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_rgShieldPress' },
+  st_rgVanishingPoint:{ dur:500, scale:1.8, fallFrom:0, anchor:'center', fxKind:'fxk_rgVanishingPoint' },
+  st_rgInspiration:{ dur:900, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_rgInspiration' },
+  st_rgMoonSlasher:{ dur:620, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_rgMoonSlasher' },
+  st_abAdoramus:{ dur:820, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_abAdoramus' },
+  st_abJudex:{ dur:720, scale:2.4, fallFrom:60, anchor:'head', fxKind:'fxk_abJudex' },
+  st_abHighnessHeal:{ dur:860, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_abHighnessHeal' },
+  st_abSacrament:{ dur:900, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_abSacrament' },
+  st_abClementia:{ dur:880, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_abClementia' },
+  st_abCantoCandidus:{ dur:880, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_abCantoCandidus' },
+  st_suTigerCannon:{ dur:700, scale:2.5, fallFrom:0, anchor:'center', fxKind:'fxk_suTigerCannon' },
+  st_suGateOfHell:{ dur:780, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_suGateOfHell' },
+  st_suRampageBlaster:{ dur:680, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_suRampageBlaster' },
+  st_suKnuckleArrow:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_suKnuckleArrow' },
+  st_suSkyNetBlow:{ dur:640, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_suSkyNetBlow' },
+  st_suFallenEmpire:{ dur:600, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_suFallenEmpire' },
+  st_scEarthGrave:{ dur:760, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_scEarthGrave' },
+  st_scVaretyrSpear:{ dur:560, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_scVaretyrSpear' },
+  st_scStriking:{ dur:860, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_scStriking' },
+  st_scEnergyCoat:{ dur:880, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_scEnergyCoat' },
+  st_gxCrossImpact:{ dur:560, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_gxCrossImpact' },
+  st_gxDarkClaw:{ dur:820, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_gxDarkClaw' },
+  st_gxCounterSlash:{ dur:520, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_gxCounterSlash' },
+  st_gxPhantomMenace:{ dur:640, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_gxPhantomMenace' },
+  st_gxRollingCutter:{ dur:620, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_gxRollingCutter' },
+  st_gxVenomPressure:{ dur:680, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_gxVenomPressure' },
+  st_dkDragonBreath:{ dur:720, scale:2.5, fallFrom:0, anchor:'center', fxKind:'fxk_dkDragonBreath' },
+  st_dkHackAndSlasher:{ dur:540, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_dkHackAndSlasher' },
+  st_dkStormSlash:{ dur:660, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_dkStormSlash' },
+  st_dkMadnessCrusher:{ dur:580, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_dkMadnessCrusher' },
+  st_cdArbitrium:{ dur:760, scale:2.5, fallFrom:60, anchor:'head', fxKind:'fxk_cdArbitrium' },
+  st_cdFrancisca:{ dur:560, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_cdFrancisca' },
+  st_cdPrayer:{ dur:900, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_cdPrayer' },
+  st_cdPneuma:{ dur:900, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_cdPneuma' },
+  st_amClimaxStorm:{ dur:820, scale:2.6, fallFrom:0, anchor:'center', fxKind:'fxk_amClimaxStorm' },
+  st_amFrozenSlash:{ dur:600, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_amFrozenSlash' },
+  st_amRainOfCrystal:{ dur:860, scale:2.2, fallFrom:80, anchor:'head', fxKind:'fxk_amRainOfCrystal' },
+  st_amViolentQuake:{ dur:800, scale:2.6, fallFrom:0, anchor:'center', fxKind:'fxk_amViolentQuake' },
+  st_whCalamityGale:{ dur:800, scale:2.5, fallFrom:0, anchor:'center', fxKind:'fxk_whCalamityGale' },
+  st_whGaleStorm:{ dur:580, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_whGaleStorm' },
+  st_whCrescive:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_whCrescive' },
+  st_whHawkRush:{ dur:640, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_whHawkRush' },
+  st_abFrenzyShot:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_abFrenzyShot' },
+  st_abDeftStab:{ dur:520, scale:1.8, fallFrom:0, anchor:'center', fxKind:'fxk_abDeftStab' },
+  st_abChainReaction:{ dur:680, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_abChainReaction' },
+  st_shFatalMenace:{ dur:620, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_shFatalMenace' },
+  st_shTriangleShot:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_shTriangleShot' },
+  st_shFeintBomb:{ dur:660, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_shFeintBomb' },
+  st_shShadowSpell:{ dur:700, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_shShadowSpell' },
+  st_shMasquerade:{ dur:820, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_shMasquerade' },
+  st_shManholeTrap:{ dur:760, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_shManholeTrap' },
+  st_raArrowStorm:{ dur:820, scale:2.4, fallFrom:70, anchor:'head', fxKind:'fxk_raArrowStorm' },
+  st_raAimedBolt:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_raAimedBolt' },
+  st_raElectricShocker:{ dur:720, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_raElectricShocker' },
+  st_raClusterBomb:{ dur:700, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_raClusterBomb' },
+  st_raSharpShooting:{ dur:560, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_raSharpShooting' },
+  st_raWargStrike:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_raWargStrike' },
+  st_miSevereRainstorm:{ dur:840, scale:2.4, fallFrom:75, anchor:'head', fxKind:'fxk_miSevereRainstorm' },
+  st_miReverberation:{ dur:720, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_miReverberation' },
+  st_miMetallicSound:{ dur:660, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_miMetallicSound' },
+  st_miDominionImpulse:{ dur:740, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_miDominionImpulse' },
+  st_miWarcryBeyond:{ dur:880, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_miWarcryBeyond' },
+  st_miSongOfMana:{ dur:900, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_miSongOfMana' },
+  st_meArmCannon:{ dur:700, scale:2.4, fallFrom:0, anchor:'center', fxKind:'fxk_meArmCannon' },
+  st_meVulcanArm:{ dur:520, scale:1.8, fallFrom:0, anchor:'center', fxKind:'fxk_meVulcanArm' },
+  st_meKnuckleBoost:{ dur:540, scale:1.9, fallFrom:0, anchor:'center', fxKind:'fxk_meKnuckleBoost' },
+  st_meAxeTornado:{ dur:680, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_meAxeTornado' },
+  st_meAxeBoomerang:{ dur:560, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_meAxeBoomerang' },
+  st_meSelfDestruction:{ dur:780, scale:2.7, fallFrom:0, anchor:'center', fxKind:'fxk_meSelfDestruction' },
+  st_geCartCannon:{ dur:680, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_geCartCannon' },
+  st_geCrazyWeed:{ dur:720, scale:2.3, fallFrom:0, anchor:'center', fxKind:'fxk_geCrazyWeed' },
+  st_geSporeExplosion:{ dur:700, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_geSporeExplosion' },
+  st_geHellPlant:{ dur:780, scale:2.2, fallFrom:0, anchor:'center', fxKind:'fxk_geHellPlant' },
+  st_geAcidBomb:{ dur:620, scale:2.0, fallFrom:0, anchor:'center', fxKind:'fxk_geAcidBomb' },
+  st_geThornTrap:{ dur:740, scale:2.1, fallFrom:0, anchor:'center', fxKind:'fxk_geThornTrap' },
 };
 function spawnFxFrames(kind, x, y, delay) {
   const st = FX_STYLE[kind]; if (!st) return;
@@ -24492,9 +25038,9 @@ function update(dt, now) {
           if (t.x !== player.x) player.facingLeft = t.x < player.x;
           // ออโต้ใช้สกิลโจมตีเอง: ลองไล่สกิล Active สูงสุด 5 ตัวแรกของอาชีพ ตัวไหนพร้อมก่อนใช้ก่อน แทนที่จะตีธรรมดาอย่างเดียว
           let skillUsed = false;
-          const autoSkillList = getAutoSkillSlots().map(k => currentSkills().find(s=>s.key===k)).filter(Boolean);
+          const autoSkillList = autoSkillPlan();
           for (const s of autoSkillList) {
-            if (tryAutoCastSkill(s.key, () => true)) { skillUsed = true; break; }
+            if (tryAutoCastSkill(s.key, () => true, s.cls)) { skillUsed = true; break; }
           }
           if (!skillUsed && !player.skillOnlyMode && player.atkCooldown <= 0) {
             // ดาเมจสุ่มในช่วง min-max โดย DEX สูงทำให้ดาเมจนิ่งขึ้น
@@ -27798,14 +28344,24 @@ function repairDowngradedClass(p) {
       const correct3rd = THIRD_CLASS_OPTIONS[correct2ndTrans];    // Stalker -> Shadow Chaser
       p.className = correct3rd || p.className;
       p.thirdClass = correct3rd || p.thirdClass;
+      // ถ้าเคยขึ้นขั้น 4 มาแล้ว ย้ายไปขั้น 4 ของสายที่ถูกต้อง (ไม่ริบความคืบหน้าทิ้ง)
+      if (p.fourthClass && typeof FOURTH_CLASS_MAP !== 'undefined') {
+        p.fourthClass = FOURTH_CLASS_MAP[p.thirdClass] || null;
+        if (p.fourthClass) p.className = p.fourthClass;
+      }
       p.pathClass = correct3rd || p.pathClass;
       p.highClass = correct2ndTrans || p.highClass;
       p.highClassPrev = correct2ndTrans || p.highClassPrev;
       return;
     }
-    // สายถูก แต่ className ถูกลดขั้น -> คืน className เป็น 3rd job
-    if (p.className !== cur3rd) {
-      p.className = cur3rd;
+    // สายถูก แต่ className ถูกลดขั้น -> คืน className ให้ตรงขั้นสูงสุดที่ผู้เล่นถึงจริง
+    // ถ้าขึ้นขั้น 4 ของสายนี้ไปแล้ว className ต้องเป็นขั้น 4 ไม่ใช่ขั้น 3
+    // (ไม่มีบรรทัดนี้ ทั้งชื่ออาชีพและสไปรท์ตัวละครจะถูกดึงกลับเป็นขั้น 3 ทุกครั้งที่โหลดเซฟ)
+    const valid4th = (p.fourthClass && typeof FOURTH_CLASS_MAP !== 'undefined'
+                      && FOURTH_CLASS_MAP[cur3rd] === p.fourthClass) ? p.fourthClass : null;
+    const wantCls = valid4th || cur3rd;
+    if (p.className !== wantCls) {
+      p.className = wantCls;
       p.pathClass = p.pathClass || cur3rd;
       if (!p.highClass && cur2ndTrans) p.highClass = cur2ndTrans;
     }
