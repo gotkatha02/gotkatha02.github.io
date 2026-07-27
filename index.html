@@ -395,6 +395,7 @@
         <button class="secondary" id="dpsBtn" style="border-color:#6ac08a;color:#8ad0a0">📊 ตัววัด DPS</button>
         <button class="secondary" id="mapModBtn" style="border-color:#c08a6a;color:#f0b890">🌗 สภาพแมพ</button>
         <button class="secondary" id="weeklyBtn" style="border-color:#c0a060;color:#ffd24a">📅 บอสรายสัปดาห์</button>
+        <button class="secondary" id="autoSellBtn" style="border-color:#6fd06f;color:#8ad0a0">💸 ขายอัตโนมัติ</button>
       </div>
     </div>
     <div class="grp">
@@ -8999,6 +9000,7 @@ const player = {
   perf:{ fps:60, saver:true },                                 // จำกัดเฟรมเรต / โหมดประหยัดแบต
   mapMods:{},                                                  // สภาพแมพ (คำสาป/พร) ต่อแมพ
   weekly:{ week:'', done:{} },                                 // บอสรายสัปดาห์
+  autoSell:{ on:false, maxRarity:'common', maxTier:0, keepBoss:true, keepSet:true, keepAffix:true, sold:0, gold:0 },
   potions:{ hp:0, sp:0 }, potionCd:0, autoSkillSlots:{}, skillOnlyMode:false,
   blessUntil:0, blessBonus:0, angelusUntil:0, angelusBonus:0, concUntil:0, concBonus:0,
   cartUntil:0, cartBonus:0, hidingUntil:0, facingLeft:false, facingUp:false, attackFlashUntil:0, hurtFlashUntil:0, kyrieShield:0, furyUntil:0, furyBonus:0,
@@ -9704,7 +9706,8 @@ function critChance() {
 function hcLifestealPct()  { return passiveLv(LIFESTEAL_PASSIVE_KEYS)*0.02; }
 function hcHealPowerMul()  { return 1 + passiveLv(HEALPOWER_PASSIVE_KEYS)*0.10; }
 function hcSpCostMul()     { return Math.max(0.5, 1 - passiveLv(SPCOST_PASSIVE_KEYS)*0.04 - sumPas(SPCOST_PAS2)*0.04); }
-function hcCooldownMul()   { return Math.max(0.6, 1 - passiveLv(COOLDOWN_PASSIVE_KEYS)*0.03 - sumPas(CD_PAS2)*0.03 - sumPas(CD_PAS3)*0.03); }
+function affixCdReducePct() { try { return Math.min(45, affixTotal('cdReduce')); } catch(e) { return 0; } }
+function hcCooldownMul()   { return Math.max(0.4, 1 - passiveLv(COOLDOWN_PASSIVE_KEYS)*0.03 - sumPas(CD_PAS2)*0.03 - sumPas(CD_PAS3)*0.03 - affixCdReducePct()/100); }
 function hcPoisonMul()     { return 1 + passiveLv(POISONDMG_PASSIVE_KEYS)*0.08; }
 function hcGoldMul()       { return 1 + passiveLv(GOLD_PASSIVE_KEYS)*0.08 + sumPas(GOLD_PAS2)*0.06; }
 function critMultiplier() { const dunCd = (typeof dunSetBonusStats === 'function') ? dunSetBonusStats().critDmgPct/100 : 0; return paragonBonus('critDmg') + 1.8 + effStat('luk')*0.003 + achBonus('critDmg') + petBonus('critDmg') + highBonus('critDmg')*0.5 + getPathSkillLv('deadlyPrecision')*0.08 + passiveLv(CRITDMG_PASSIVE_KEYS)*0.06 + bossEffectTotal('critDmg')*0.01 + rogueBuffTotal('critDmg')/100 + getSkillLv('sxCrossRipper')*0.12 + sumPas(CRITDMG_PAS2)*0.08 + sumPas(CRITDMG_PAS3)*0.07 + dunCd; }
@@ -14130,6 +14133,105 @@ function toggleItemLock(id) {
   openInventory();
 }
 
+// ============ ขายอัตโนมัติ ============
+// ขายของที่ดรอปใหม่ทันทีถ้าเข้าเงื่อนไขที่ตั้งไว้ — ของล็อก/ฝังการ์ด/ใส่อยู่ จะไม่ถูกแตะ
+function autoSellSettings() {
+  if (!player.autoSell || typeof player.autoSell !== 'object') {
+    player.autoSell = { on:false, maxRarity:'common', maxTier:0, keepBoss:true, keepSet:true, keepAffix:true, sold:0, gold:0 };
+  }
+  const a = player.autoSell;
+  if (typeof a.on !== 'boolean') a.on = false;
+  if (!a.maxRarity) a.maxRarity = 'common';
+  if (typeof a.maxTier !== 'number') a.maxTier = 0;      // 0 = ไม่จำกัดเทียร์
+  if (typeof a.keepBoss !== 'boolean') a.keepBoss = true;
+  if (typeof a.keepSet !== 'boolean') a.keepSet = true;
+  if (typeof a.keepAffix !== 'boolean') a.keepAffix = true;
+  if (typeof a.sold !== 'number') a.sold = 0;
+  if (typeof a.gold !== 'number') a.gold = 0;
+  return a;
+}
+const AUTOSELL_RARITY_ORDER = ['common','rare','epic','legendary'];
+// เช็คว่าไอเทมชิ้นนี้เข้าเงื่อนไขขายอัตโนมัติไหม (คืนเหตุผลถ้าไม่ขาย เพื่อเอาไปโชว์ได้)
+function autoSellCheck(it) {
+  const a = autoSellSettings();
+  if (!a.on) return { sell:false, why:'ปิดอยู่' };
+  if (!it || it.isCard || it.isGem) return { sell:false, why:'ไม่ใช่อุปกรณ์' };
+  if (isLocked(it)) return { sell:false, why:'ล็อกไว้' };
+  if (it.cards && it.cards.length) return { sell:false, why:'มีการ์ดฝัง' };
+  if (a.keepBoss && (it.bossDrop || it.endgame)) return { sell:false, why:'ของบอส' };
+  if (a.keepSet && it.setName) return { sell:false, why:'ชุดเซ็ต' };
+  if (a.keepAffix && it.affixes && it.affixes.length) return { sell:false, why:'มีออฟฟิกซ์' };
+  const ri = AUTOSELL_RARITY_ORDER.indexOf(it.rarity || 'common');
+  const mi = AUTOSELL_RARITY_ORDER.indexOf(a.maxRarity);
+  if (ri > mi) return { sell:false, why:'ระดับสูงกว่าที่ตั้ง' };
+  if (a.maxTier > 0 && itemGearTier(it) > a.maxTier) return { sell:false, why:'เทียร์สูงกว่าที่ตั้ง' };
+  return { sell:true, why:'' };
+}
+// เรียกตอนของเข้ากระเป๋า — คืน true ถ้าขายไปแล้ว (ผู้เรียกจะได้ไม่ต้องใส่ลงกระเป๋า)
+function autoSellTry(it) {
+  const c = autoSellCheck(it);
+  if (!c.sell) return false;
+  const g = sellPrice(it);
+  player.gold += g;
+  const a = autoSellSettings();
+  a.sold++; a.gold += g;
+  try { document.getElementById('goldVal').textContent = player.gold; } catch(e) {}
+  return true;
+}
+function setAutoSellOn(v)      { autoSellSettings().on = !!v; log(v?'💸 เปิดขายอัตโนมัติ':'💸 ปิดขายอัตโนมัติ','card'); openAutoSell(); }
+function setAutoSellRarity(k)  { autoSellSettings().maxRarity = k; openAutoSell(); }
+function setAutoSellTier(v)    { autoSellSettings().maxTier = v; openAutoSell(); }
+function toggleAutoSellKeep(k) { const a=autoSellSettings(); a[k]=!a[k]; openAutoSell(); }
+function resetAutoSellStat()   { const a=autoSellSettings(); a.sold=0; a.gold=0; openAutoSell(); }
+function openAutoSell() {
+  player.paused = true;
+  const a = autoSellSettings();
+  const on = (b) => b ? ';background:#2a4a2a;border-color:#8ad0a0;color:#cfe8cf' : '';
+  // ตัวอย่าง: ของในกระเป๋าตอนนี้จะโดนขายกี่ชิ้น
+  const hit = player.inventory.filter(it => autoSellCheck(it).sell);
+  const hitGold = hit.reduce((s,it)=>s+sellPrice(it),0);
+  let h = `<h3>💸 ขายอัตโนมัติ</h3>
+    <div style="font-size:11px;color:#8a7a5a;text-align:left;line-height:1.7;margin-bottom:8px">
+      ของที่ดรอปใหม่แล้วเข้าเงื่อนไข จะถูกขายทันทีโดยไม่เข้ากระเป๋า<br>
+      <b style="color:#8ad0a0">ของที่ล็อก · ฝังการ์ด · ใส่อยู่ จะไม่ถูกขายเด็ดขาด</b>
+    </div>
+    <div class="skillRow" style="border-color:${a.on?'#6fd06f':'#5a5a5a'}">
+      <div class="skillFoot" style="align-items:center">
+        <span style="text-align:left;font-size:13px"><b style="color:${a.on?'#8ad0a0':'#8a8a8a'}">${a.on?'เปิดอยู่':'ปิดอยู่'}</b>
+          <br><span style="font-size:10px;color:#8a7a5a">ขายไปแล้ว ${a.sold.toLocaleString()} ชิ้น · ได้ ${a.gold.toLocaleString()} Zeny</span></span>
+        <button class="${a.on?'invBtn':'castBtn'}" onclick="setAutoSellOn(${a.on?'false':'true'})">${a.on?'ปิด':'เปิด'}</button>
+      </div></div>
+    <div class="section">ขายไม่เกินระดับ</div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap">
+      ${AUTOSELL_RARITY_ORDER.map(k=>{ const r=RARITIES.find(x=>x.key===k);
+        return `<button class="invBtn" style="font-size:11px;padding:5px 9px;color:${r.color}${a.maxRarity===k?';background:#3a3a2a;border-color:'+r.color:''}"
+          onclick="setAutoSellRarity('${k}')">${r.label}</button>`; }).join('')}
+    </div>
+    <div class="section">ขายไม่เกินเทียร์</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">
+      ${[0,3,6,9,11,13,15].map(v=>`<button class="invBtn" style="font-size:10px;padding:4px 8px${a.maxTier===v?';background:#3a3a2a;border-color:#c0a060;color:#ffd24a':''}"
+        onclick="setAutoSellTier(${v})">${v===0?'ทุกเทียร์':'ถึง T'+v}</button>`).join('')}
+    </div>
+    <div class="section">เก็บไว้เสมอ (ไม่ขาย)</div>
+    <div class="skillRow"><div class="skillFoot" style="flex-wrap:wrap;gap:5px">
+      <button class="invBtn" style="font-size:11px${on(a.keepBoss)}"  onclick="toggleAutoSellKeep('keepBoss')">⚔ ของบอส</button>
+      <button class="invBtn" style="font-size:11px${on(a.keepSet)}"   onclick="toggleAutoSellKeep('keepSet')">👑 ชุดเซ็ต</button>
+      <button class="invBtn" style="font-size:11px${on(a.keepAffix)}" onclick="toggleAutoSellKeep('keepAffix')">✦ มีออฟฟิกซ์</button>
+    </div></div>
+    <div class="skillRow" style="border-color:#c0a060">
+      <div style="text-align:left;font-size:12px;color:#b8a880">
+        ถ้าตั้งค่านี้ ของในกระเป๋าตอนนี้จะเข้าเงื่อนไข <b style="color:#ffd24a">${hit.length}</b> ชิ้น
+        (ขายได้ ${hitGold.toLocaleString()} Zeny)<br>
+        <span style="font-size:10px;color:#8a7a5a">ตัวเลขนี้ดูเฉยๆ — ระบบขายเฉพาะของที่ดรอป<b>ใหม่</b> ไม่แตะของเก่าในกระเป๋า</span>
+      </div></div>
+    <div class="skillFoot" style="margin-top:8px">
+      <button class="invBtn" onclick="resetAutoSellStat()">↺ ล้างสถิติ</button>
+      <button class="invBtn" onclick="closeModal(); openInventory();">🎒 เปิดกระเป๋า</button></div>
+    <button class="closeBtn" onclick="closeModal()">ปิด</button>`;
+  document.getElementById('modal').innerHTML = h;
+  document.getElementById('modalBg').style.display = 'flex';
+}
+
 // ============ ขายทั้งหมด ============
 // นับเฉพาะของที่ขายได้จริง: ไม่ล็อก และไม่มีการ์ดฝังอยู่
 function sellableItems(list) {
@@ -15623,6 +15725,7 @@ const AFFIX_POOL = [
   { kind:'damageCut', label:'ลดดาเมจที่ได้รับ', affix:'suffix', min:3,  max:10, unit:'%', weight:35  },
   { kind:'regen',     label:'ฟื้นฟู HP',       affix:'suffix', min:5,  max:20, unit:'',  weight:60  },
   { kind:'spCost',    label:'ลด SP ที่ใช้',    affix:'suffix', min:4,  max:12, unit:'%', weight:40  },
+  { kind:'cdReduce',  label:'ลดคูลดาวน์',      affix:'suffix', min:2,  max:6,  unit:'%', weight:24  },
   { kind:'reflect',   label:'สะท้อนดาเมจ',     affix:'suffix', min:4,  max:12, unit:'%', weight:35  },
 ];
 const AFFIX_MAX_PREFIX = 3, AFFIX_MAX_SUFFIX = 3;
@@ -15630,10 +15733,15 @@ const AFFIX_MAX_ROWS = 6;   // POE: Rare/Unique มี affix ได้ถึง 
 
 // ---- ระบบ Tier ของ affix (แบบ POE: T1 ดีสุด, เจอ tier สูงเฉพาะของ tier สูง) ----
 // affix 1 ชนิดมี 5 tier. tier สูง = ค่าสูง แต่ต้องของ item tier สูงถึงจะได้
-const AFFIX_TIER_COUNT = 5;
+const AFFIX_TIER_COUNT = 12;      // เพดานรวม (ดรอปได้ถึง T8 · T9-T12 ต้องอัพเกรดเอง)
+const AFFIX_TIER_DROP_MAX = 8;    // เทียร์สูงสุดที่สุ่มได้จากการดรอป
 // item tier (10..250) -> tier สูงสุดที่ติดได้
+// เพดานเทียร์ "ตอนสุ่มดรอป" — T9 ขึ้นไปต้องอัพเกรดด้วยหินเท่านั้น
 function maxAffixTier(itemTier) {
   const t = itemTier || 10;
+  if (t >= 300) return 8;   // ห้วงสิ้นกาล (เพดานดรอป)
+  if (t >= 280) return 7;   // บัลลังก์อวสาน
+  if (t >= 265) return 6;   // ประตูเหวอวสาน
   if (t >= 200) return 5;
   if (t >= 120) return 4;
   if (t >= 70)  return 3;
@@ -15820,6 +15928,11 @@ function rerollCancel() {
   else closeModal();
 }
 function rrTierColor(t) {
+  if (t >= 12) return '#ffffff';
+  if (t >= 11) return '#8affe1';
+  if (t >= 10) return '#4affc8';
+  if (t >= 9)  return '#7affa0';
+  if (t >= 8) return '#ffe14a';
   if (t >= 7) return '#ff5aa0';
   if (t >= 6) return '#ff9a3c';
   if (t >= 5) return '#c86cff';
@@ -15955,7 +16068,7 @@ function awakenAffix(itemId, idx) {
 }
 function affixTierRange(p, tier) {
   // แบ่งช่วง base (p.min..p.max) เป็นฐาน แล้ว tier สูงคูณเพิ่ม
-  const tierMul = [0.6, 0.85, 1.1, 1.4, 1.8, 2.4, 3.2][tier-1] || 1;
+  const tierMul = [0.6, 0.85, 1.1, 1.4, 1.8, 2.4, 3.2, 4.2, 5.4, 6.8, 8.4, 10.2][tier-1] || 1;
   const lo = Math.max(1, Math.round(p.min * tierMul));
   const hi = Math.max(lo+1, Math.round(p.max * tierMul));
   return { lo, hi };
@@ -15984,27 +16097,27 @@ function rollOneAffix(item) {
   let roll = Math.random() * total, p = cand[0];
   for (const c of cand) { const w = effWeight(c); if (roll < w) { p = c; break; } roll -= w; }
   // สุ่ม tier: จำกัดไม่เกิน maxAffixTier ของ item, tier สูงหายากกว่า (ถ่วงน้ำหนักลดหลั่น)
+  // สุ่มเทียร์: จำกัดไม่เกิน maxAffixTier ของไอเทม · เทียร์สูงยิ่งหายาก
+  // (เดิมโค้ดส่วนนี้คำนวณแล้วทิ้งผล บังคับ T1 เสมอ — ตอนนี้ใช้ผลจริงแล้ว)
   const maxT = maxAffixTier(itemTier);
-  const tierWeights = [];
-  for (let t=1;t<=maxT;t++) tierWeights.push({ t, w: Math.pow(0.55, maxT - t) });  // tier สูงสุด weight มากสุด? กลับกัน: ให้ tier ต่ำเจอบ่อย
-  // จริงๆ ให้ tier สูงหายาก: weight มากที่ tier ต่ำ
   const tw = [];
-  for (let t=1;t<=maxT;t++) tw.push({ t, w: Math.pow(0.6, t-1) });
-  const twTotal = tw.reduce((s,x)=>s+x.w,0);
-  let tr = Math.random()*twTotal, tier = tw[0].t;
+  for (let t = 1; t <= maxT; t++) tw.push({ t, w: Math.pow(0.6, t - 1) });
+  const twTotal = tw.reduce((s, x) => s + x.w, 0);
+  let tr = Math.random() * twTotal, tier = tw[0].t;
   for (const x of tw) { if (tr < x.w) { tier = x.t; break; } tr -= x.w; }
-  // ระบบใหม่: ออฟเริ่มที่ T1 เสมอ (อัพเกรดด้วยหินอัพเกรด) — เก็บ baseValue ไว้คูณตาม tier
+  // baseValue เก็บเป็นค่าฐาน T1 เสมอ — affixValue() จะคูณตามเทียร์ให้เอง
   const rng = affixTierRange(p, 1);
-  const baseV = rng.lo + Math.floor(Math.random()*(rng.hi-rng.lo+1));
-  return { kind:p.kind, label:p.label, value:baseV, baseValue:baseV, unit:p.unit, affix:p.affix, tier:1, locked:false };
+  const baseV = rng.lo + Math.floor(Math.random() * (rng.hi - rng.lo + 1));
+  return { kind:p.kind, label:p.label, value:baseV, baseValue:baseV, unit:p.unit, affix:p.affix, tier:tier, locked:false };
 }
 function rerollCost(lockedCount) { return 1 + lockedCount; }   // 0 ล็อก=1, 1 ล็อก=2, 2 ล็อก=3
 
 // ตัวคูณค่าออฟตาม tier: T1=1.0, +0.5 ต่อระดับ
 function affixTierMult(tier) {
   var t = tier || 1;
-  if (t <= 5) return 1 + (t - 1) * 0.5;
-  return t === 6 ? 4.0 : 5.5;
+  if (t <= 5) return 1 + (t - 1) * 0.5;   // T1=1.0 ... T5=3.0
+  // T6 ขึ้นไปโตเร็วขึ้น แต่ไม่ระเบิด (ราว +20% ต่อขั้นในช่วงท้าย)
+  return [4.0, 5.5, 7.5, 9.0, 10.8, 12.8, 15.0][t - 6] || 15.0;
 }
 // ค่าออฟจริงหลังคูณ tier (baseValue = ค่าฐาน T1)
 function affixValue(a) {
@@ -16376,7 +16489,9 @@ function doAnnul() {   // หินอัพเกรดออฟ: ดันร�
   if (it.corrupted) { log('ของถูกสาปแล้ว คราฟไม่ได้', 'hit'); return; }
   if (!it.affixes || !it.affixes.length) { log('ไม่มีออฟให้อัพเกรด', 'hit'); return; }
   // ต้องล็อกออฟที่จะอัพไว้ 1 แถวก่อน (เลือกเป้าหมายชัดเจน)
-  const lockedRows = it.affixes.filter(a => a.locked);
+  let lockedRows = it.affixes.filter(a => a.locked);
+  // ถ้ามีออฟแถวเดียว ไม่ต้องล็อกก่อน — อัพได้เลย
+  if (lockedRows.length === 0 && it.affixes.length === 1) lockedRows = [it.affixes[0]];
   if (lockedRows.length === 0) { log('🔒 ล็อกออฟที่จะอัพเกรดไว้ 1 แถวก่อน', 'hit'); return; }
   if (lockedRows.length > 1) { log('อัพเกรดได้ครั้งละ 1 แถว — ล็อกไว้แถวเดียว', 'hit'); return; }
   const target = lockedRows[0];
@@ -16384,9 +16499,15 @@ function doAnnul() {   // หินอัพเกรดออฟ: ดันร�
   const capTier = AFFIX_TIER_COUNT;   // เพดานระดับออฟ
   if (tier >= capTier) { log(`⛔ ${target.label} อยู่ที่ T${tier} เต็มเพดานแล้ว (ตัน)`, 'hit'); return; }
   const cost = tier;   // ใช้หินเท่าระดับปัจจุบัน (T1=1, T2=2, ...)
+  // T9 ขึ้นไป (เกินเพดานดรอป) ต้องใช้ผลึกสิ้นกาลเพิ่มด้วย — เป็นเป้าหมายระยะยาวของเอนด์เกม
+  const crystalCost = tier >= AFFIX_TIER_DROP_MAX ? (tier - AFFIX_TIER_DROP_MAX + 1) * 40 : 0;
   if (matCount('annul_orb') < cost) { log(`${ANNUL_ORB.name}ไม่พอ (ต้องใช้ ${cost} ก้อน)`, 'hit'); return; }
+  if (crystalCost && matCount('mat_abyss3') < crystalCost) {
+    log(`${materialInfo('mat_abyss3').name}ไม่พอ (T${tier}→T${tier+1} ต้องใช้ ${crystalCost})`, 'hit'); return;
+  }
   if (!chargeCraftGold()) return;
   useMat('annul_orb', cost);
+  if (crystalCost) useMat('mat_abyss3', crystalCost);
   const equipped = Object.values(player.equipment).some(x => x && x.id === it.id);
   if (equipped) applyHpBonus(it, -1);
   target.tier = tier + 1;   // ดันขึ้นแน่นอน ไม่ตก
@@ -21013,7 +21134,8 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
     if (MAP_WEAPONS[wpnMap] && Math.random() < wpnChance) {
       const wp = generateWeapon(wpnMap); if(m.isBoss) applyBossDropBonus(wp);
       if (wp) {
-        if (player.inventory.length < invMax()) {
+        if (autoSellTry(wp)) { dropMsg += ` | 💸 ขายอัตโนมัติ: ${wp.name} (+${sellPrice(wp).toLocaleString()}g)`; }
+        else if (player.inventory.length < invMax()) {
           player.inventory.push(wp);
           dropMsg += ` | ⚔️ อาวุธ: ${wp.name}${affixRarityLog(wp)}`;
           { const _rt=affixRarityTier(wp); if(_rt&&_rt.n>=5) log(`${_rt.icon} ${_rt.name} DROP! ${wp.name} (${_rt.n} ออฟ)`, 'card'); }
@@ -21028,7 +21150,8 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
     if (MAP_WEAPONS_1H[wpn1hMap] && Math.random() < wpn1hChance) {
       const wp = generateWeapon1H(wpn1hMap); if(m.isBoss) applyBossDropBonus(wp);
       if (wp) {
-        if (player.inventory.length < invMax()) {
+        if (autoSellTry(wp)) { dropMsg += ` | 💸 ขายอัตโนมัติ: ${wp.name} (+${sellPrice(wp).toLocaleString()}g)`; }
+        else if (player.inventory.length < invMax()) {
           player.inventory.push(wp);
           dropMsg += ` | 🗡️ อาวุธมือเดียว: ${wp.name}${affixRarityLog(wp)}`;
           refreshInvButton();
@@ -21042,7 +21165,8 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
     if (MAP_ACCESSORIES[accMap] && Math.random() < accChance) {
       const ac = generateAccessory(accMap); if(m.isBoss) applyBossDropBonus(ac);
       if (ac) {
-        if (player.inventory.length < invMax()) {
+        if (autoSellTry(ac)) { dropMsg += ` | 💸 ขายอัตโนมัติ: ${ac.name} (+${sellPrice(ac).toLocaleString()}g)`; }
+        else if (player.inventory.length < invMax()) {
           player.inventory.push(ac);
           dropMsg += ` | 💍 เครื่องประดับ: ${ac.name}${affixRarityLog(ac)}`;
           refreshInvButton();
@@ -21056,7 +21180,8 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
     if (MAP_HEADGEAR[headMap] && Math.random() < headChance) {
       const hg = generateHeadgear(headMap); if(m.isBoss) applyBossDropBonus(hg);
       if (hg) {
-        if (player.inventory.length < invMax()) {
+        if (autoSellTry(hg)) { dropMsg += ` | 💸 ขายอัตโนมัติ: ${hg.name} (+${sellPrice(hg).toLocaleString()}g)`; }
+        else if (player.inventory.length < invMax()) {
           player.inventory.push(hg);
           dropMsg += ` | 🎧 ${hg.name}${affixRarityLog(hg)}`;
           refreshInvButton();
@@ -21070,7 +21195,8 @@ const dropMul = m.isTower ? 2 : 1;   // มอนในหอคอย: Gem + �
       const ap = generateBossArmorPiece(armorLv);
       if (ap) {
         applyBossDropBonus(ap);
-        if (player.inventory.length < invMax()) {
+        if (autoSellTry(ap)) { dropMsg += ` | 💸 ขายอัตโนมัติ: ${ap.name} (+${sellPrice(ap).toLocaleString()}g)`; }
+        else if (player.inventory.length < invMax()) {
           player.inventory.push(ap);
           dropMsg += ` | 🛡️ ${ap.name}${affixRarityLog(ap)}`;
           refreshInvButton();
@@ -30506,6 +30632,7 @@ document.getElementById('eternalBtn').onclick = () => openEternalPanel();
 document.getElementById('dpsBtn').onclick = () => openDpsPanel();
 document.getElementById('mapModBtn').onclick = () => openMapModPanel();
 document.getElementById('weeklyBtn').onclick = () => openWeeklyPanel();
+document.getElementById('autoSellBtn').onclick = () => openAutoSell();
 document.getElementById('statGuideBtn').onclick = () => {
   player.paused = true;
   const s = player.stats, e = k => effStat(k);
@@ -30635,7 +30762,7 @@ function profileSummary(email) {
 }
 const SAVE_FIELDS = ['x','y','currentMap','dir','level','exp','expNext','jobLevel','jobExp','jobNext',
   'arcaneSpells','className','pathClass','firstJobClass','highClass','highBonus','secondJobClass','classRenameV2','highSpFixV1','hp','maxHp','sp','maxSp','baseHp','baseSp','stats','statPoints','skillPoints',
-  'charName','skillLevels','gold','bagUpgrades','materials','kills','bossLog','achClaimed','pets','activePet','login','slotRefine','slotBroken','slotRefineV1','cardSlots','cardMigV1','noviceMigV1','thirdClass','fourthClass','thirdBonus','highClassPrev','quests','tower','dungeon','rogue','potions','autoSkillSlots','skillOnlyMode','equipment','twoHanded','inventory','dragonMount','fashion','autoFuse','autoRefine','fifthClass','fxOpt','dmgCap','diff','paragon','petEvo','eternal','perf','mapMods','weekly'];
+  'charName','skillLevels','gold','bagUpgrades','materials','kills','bossLog','achClaimed','pets','activePet','login','slotRefine','slotBroken','slotRefineV1','cardSlots','cardMigV1','noviceMigV1','thirdClass','fourthClass','thirdBonus','highClassPrev','quests','tower','dungeon','rogue','potions','autoSkillSlots','skillOnlyMode','equipment','twoHanded','inventory','dragonMount','fashion','autoFuse','autoRefine','fifthClass','fxOpt','dmgCap','diff','paragon','petEvo','eternal','perf','mapMods','weekly','autoSell'];
 
 // ---- ไอคอนไอเทม: เก็บเป็น "รหัสอ้างอิง" ในเซฟ แล้วสร้างภาพกลับตอนโหลด ----
 // ทำให้เซฟเล็กลงมาก เพราะไม่ต้องเก็บ base64 ของรูปทุกชิ้น
@@ -33599,14 +33726,35 @@ function computeOfflineRewards(savedAt, mapId) {
   // Illunium กลาง/ใหญ่: ต้องฟาร์มแมพเลเวลสูงถึงจะได้ (แหล่งฟาร์มสำหรับ Affix Reroll / Awakening)
   const illuniumM = (lv >= 60) ? Math.floor(kills * 0.004 * Math.min(2.5, lv / 60)) : 0;
   const illuniumL = (lv >= 120) ? Math.floor(kills * 0.0012 * Math.min(2.5, lv / 120)) : 0;
+  // ---- ตัวคูณเดียวกับตอนออนไลน์ (เดิมออฟไลน์ไม่คิดให้เลย) ----
+  const ar = (typeof ABYSS_REWARD !== 'undefined' && ABYSS_REWARD[mapId]) ? ABYSS_REWARD[mapId] : null;
+  let expMul = 1, goldMul = 1, gearMul = 1, gemMul = 1, cardMul = 1, matMul = 1;
+  if (ar) { expMul *= ar.exp; goldMul *= ar.gold; gearMul *= ar.gear; gemMul *= ar.gem; cardMul *= ar.card; matMul *= ar.mat; }
+  try {
+    const tm = tierRewardMul(curTier()), td = tierDropMul(curTier());
+    expMul *= tm; goldMul *= tm; gearMul *= td; gemMul *= td; cardMul *= td;
+  } catch(e) {}
+  try {
+    const pe = 1 + paragonBonus('exp'), pd = 1 + paragonBonus('drop');
+    expMul *= pe; goldMul *= pe; gearMul *= pd; gemMul *= pd; cardMul *= pd;
+  } catch(e) {}
+  try {
+    const md = modDefs(mapId);
+    if (md && md.rewardMul) {
+      expMul *= md.rewardMul * modMul('exp', mapId);
+      goldMul *= md.rewardMul * modMul('gold', mapId);
+      gearMul *= modMul('gear', mapId); gemMul *= modMul('gem', mapId); cardMul *= modMul('card', mapId);
+    }
+  } catch(e) {}
   return {
     sec, kills, avgLv: lv,
-    exp: expPer * kills,
-    jobExp: jobPer * kills,
-    gold: goldPer * kills,
+    exp: Math.round(expPer * kills * expMul),
+    jobExp: Math.round(jobPer * kills * expMul),
+    gold: Math.round(goldPer * kills * goldMul),
     illunium, illuniumM, illuniumL,
     rep: prof.rep,
     mapId,
+    mul: { exp:expMul, gold:goldMul, gear:gearMul, gem:gemMul, card:cardMul, mat:matMul },
   };
 }
 function fmtOfflineDuration(sec) {
@@ -33625,16 +33773,53 @@ function applyOfflineRewards(r) {
   if (r.illunium > 0) addMat('illunium_s', r.illunium);
   if (r.illuniumM > 0) addMat('illunium_m', r.illuniumM);
   if (r.illuniumL > 0) addMat('illunium_l', r.illuniumL);
-  // สุ่มดรอปของ (ตามจำนวนตัวที่ฆ่า × โอกาสรวม ~4%) — จำกัดช่องกระเป๋า
-  let itemsGot = 0, cardsGot = 0;
-  const itemRolls = Math.floor(r.kills * 0.04);
-  for (let i=0;i<itemRolls && player.inventory.length < invMax();i++) {
-    try { const it = generateItem(r.avgLv, false); if (it) { player.inventory.push(it); itemsGot++; } } catch(e){}
-  }
+  // ---- ดรอปของ: ใช้ "ตารางของแมพ" เหมือนตอนออนไลน์ ----
+  // เดิมใช้ generateItem() ทั่วไป ทำให้ไม่เคยได้อาวุธ/เครื่องประดับ/หูฟังประจำแมพเลย
+  const mid = r.mapId;
+  const mul = r.mul || { gear:1, gem:1, card:1, mat:1 };
+  let itemsGot = 0, cardsGot = 0, itemLost = 0;
+  const bag = () => player.inventory.length < invMax();
+  const give = (it) => { if (!it) return false; if (!bag()) { itemLost++; return false; }
+                         if (typeof autoSellTry === 'function' && autoSellTry(it)) return true;
+                         player.inventory.push(it); itemsGot++; return true; };
+  const wpnMap  = (typeof weaponTableMapFor === 'function') ? weaponTableMapFor(mid) : mid;
+  const dropMap = (typeof dropTableMapFor  === 'function') ? dropTableMapFor(mid)  : mid;
+  const rollN = (chance) => {
+    let n = 0; const c = Math.min(1, chance * mul.gear);
+    for (let i = 0; i < r.kills; i++) if (Math.random() < c) n++;
+    return n;
+  };
+  try {
+    if (MAP_WEAPONS[wpnMap])     { let n = rollN(WEAPON_DROP_CHANCE);    for (let i=0;i<n;i++) give(generateWeapon(wpnMap)); }
+    if (MAP_WEAPONS_1H[wpnMap])  { let n = rollN(WEAPON1H_DROP_CHANCE);  for (let i=0;i<n;i++) give(generateWeapon1H(wpnMap)); }
+    if (MAP_ACCESSORIES[dropMap]){ let n = rollN(ACCESSORY_DROP_CHANCE); for (let i=0;i<n;i++) give(generateAccessory(dropMap)); }
+    if (MAP_HEADGEAR[dropMap])   { let n = rollN(HEADGEAR_DROP_CHANCE);  for (let i=0;i<n;i++) give(generateHeadgear(dropMap)); }
+  } catch(e) {}
+  // ---- วัตถุดิบประจำแมพ (แก่นอวสาน / ผลึกสิ้นกาล ฯลฯ) — เดิมออฟไลน์ไม่ได้เลย ----
+  let mapMatGot = 0, mapMatKey = null;
+  try {
+    const am = MAP_MATERIALS[mid];
+    if (am) {
+      mapMatKey = am.key;
+      for (let i = 0; i < r.kills; i++) {
+        if (Math.random() < 0.55) mapMatGot += Math.round((1 + Math.floor(Math.random()*3)) * (mul.mat||1));
+      }
+      if (mapMatGot > 0) addMat(am.key, mapMatGot);
+    }
+  } catch(e) {}
+  // ---- วัตถุดิบเพ็ท: เครื่องราง 9% ต่อตัว (ดวงจิตมาจากบอสเท่านั้น จึงไม่ให้ตอนออฟไลน์) ----
+  let charmGot = 0;
+  try {
+    const lvT = Math.max(1, Math.floor(r.avgLv / 40) + 1);
+    for (let i = 0; i < r.kills; i++) if (Math.random() < 0.09) charmGot += lvT;
+    if (charmGot > 0) addMat('pet_charm', charmGot);
+  } catch(e) {}
+  r.mapMatGot = mapMatGot; r.mapMatKey = mapMatKey; r.charmGot = charmGot; r.itemLost = itemLost;
   // การ์ด: โอกาส 0.1%/ตัว (เท่าในเกม)
   const cardRolls = r.kills;
+  const offCardChance = Math.min(1, CARD_DROP_CHANCE * (mul.card||1));
   for (let i=0;i<cardRolls && player.inventory.length < invMax();i++) {
-    if (Math.random() < CARD_DROP_CHANCE) {
+    if (Math.random() < offCardChance) {
       try { const c = generateCard(r.rep); if (c) { player.inventory.push(c); cardsGot++; } } catch(e){}
     }
   }
@@ -33647,7 +33832,7 @@ function applyOfflineRewards(r) {
                   : (r.mapId === TOWER_MAP ? 2 : 1);
   const offGemHigh = !!offMap.gemHigh;
   for (let i = 0; i < r.kills; i++) {
-    if (Math.random() < 0.005 * offGemMul) {
+    if (Math.random() < 0.005 * offGemMul * (mul.gem||1)) {
       if (player.inventory.length >= invMax()) { gemLost++; continue; }
       try { const g = generateStatGem(r.avgLv, offGemHigh); if (g) { player.inventory.push(g); gemsGot++; } } catch(e){}
     }
@@ -33680,7 +33865,10 @@ function showOfflineReport(r) {
   if (r.illunium>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${ILLUNIUM.small.name}</span><b style="color:${ILLUNIUM.small.color}">+${r.illunium.toLocaleString()}</b></div>`);
   if (r.illuniumM>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${ILLUNIUM.medium.name}</span><b style="color:${ILLUNIUM.medium.color}">+${r.illuniumM.toLocaleString()}</b></div>`);
   if (r.illuniumL>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${ILLUNIUM.large.name}</span><b style="color:${ILLUNIUM.large.color}">+${r.illuniumL.toLocaleString()}</b></div>`);
+  if (r.mapMatGot>0 && r.mapMatKey) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${materialInfo(r.mapMatKey).name}</span><b style="color:${materialInfo(r.mapMatKey).color||'#f0c060'}">+${r.mapMatGot.toLocaleString()}</b></div>`);
+  if (r.charmGot>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${PET_CHARM.name}</span><b style="color:${PET_CHARM.color}">+${r.charmGot.toLocaleString()}</b></div>`);
   if (r.itemsGot>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>🎁 ไอเทม</span><b style="color:#6fd06f">+${r.itemsGot} ชิ้น</b></div>`);
+  if (r.itemLost>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span style="color:#e0707a">⚠ กระเป๋าเต็ม ของหลุด</span><b style="color:#e0707a">${r.itemLost} ชิ้น</b></div>`);
   if (r.cardsGot>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>🃏 การ์ด</span><b style="color:#e0a0e0">+${r.cardsGot} ใบ</b></div>`);
   if (r.gemsGot>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>💎 Gem สเตตัส</span><b style="color:#7fe0ff">+${r.gemsGot} เม็ด</b></div>`);
   if (r.spellGemsGot>0) rows.push(`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>✦ Gem Auto Spell</span><b style="color:#c0a0ff">+${r.spellGemsGot} เม็ด</b></div>`);
